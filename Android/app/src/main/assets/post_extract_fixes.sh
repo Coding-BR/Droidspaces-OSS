@@ -167,6 +167,38 @@ EOF
         $MKDIR -p "$ROOTFS_PATH/etc/systemd/system/${unit}.d"
         $PRINTF "[Unit]\nConditionPathIsReadWrite=\n" > "$ROOTFS_PATH/etc/systemd/system/${unit}.d/99-readonly-fix.conf"
     done
+
+    # 3. Limit specific network services to only start in NAT mode
+    # Prevents cellular network breakage when running in host network mode
+    log "Applying NAT mode guards to network services..."
+    for unit in NetworkManager.service dhcpcd.service systemd-resolved.service systemd-networkd.service; do
+        if $TEST -f "$ROOTFS_PATH/$GUEST_SYSTEMD_PATH/$unit" || $TEST -f "$ROOTFS_PATH/etc/systemd/system/multi-user.target.wants/$unit"; then
+            $MKDIR -p "$ROOTFS_PATH/etc/systemd/system/${unit}.d"
+            $CAT > "$ROOTFS_PATH/etc/systemd/system/${unit}.d/99-netmode-limit.conf" << 'EOF'
+[Service]
+ExecCondition=
+ExecCondition=/bin/sh -c "grep -q 'net_mode=nat' /run/droidspaces/container.config"
+EOF
+        fi
+    done
+
+    # 4. Configure systemd-networkd for eth* interfaces
+    log "Configuring systemd network for eth* interfaces..."
+    $MKDIR -p "$ROOTFS_PATH/etc/systemd/network"
+    $CAT > "$ROOTFS_PATH/etc/systemd/network/10-eth-dhcp.network" << 'EOF'
+[Match]
+Name=eth*
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseDNS=yes
+UseDomains=yes
+RouteMetric=100
+EOF
+
 else
     log "Systemd not found, skipping systemd-specific fixes"
 fi
