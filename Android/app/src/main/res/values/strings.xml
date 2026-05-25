@@ -362,6 +362,7 @@
     <string name="error_unknown">Error: %1$s</string>
     <string name="actioning_service">%1$sing %2$s...</string>
     <string name="no_services_found">No Services Found</string>
+    <string name="repo_not_found_in_repo">&quot;%1$s&quot; not found in the repository</string>
     <string name="no_running_services">No running services</string>
     <string name="no_enabled_services">No enabled services</string>
     <string name="no_disabled_services">No disabled services</string>

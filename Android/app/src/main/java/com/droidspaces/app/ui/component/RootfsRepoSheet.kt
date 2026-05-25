@@ -165,18 +165,16 @@ fun RootfsRepoSheet(
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                                     )
                                     Text(
-                                        text = context.getString(R.string.no_services_found),
+                                        text = context.getString(R.string.repo_not_found_in_repo, searchQuery),
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     )
-                                    Spacer(Modifier.height(8.dp))
-                                    // Show banner in empty-state so it's visible even when no results
-                                    RepoSourceBanner()
                                 }
                             }
                         } else {
                             RepoListContent(
                                 assets         = filteredAssets,
+                                isFiltered     = searchQuery.isNotBlank(),
                                 downloadStates = vm.downloadStates,
                                 onDownload     = { vm.startDownload(it) },
                                 onCancel       = { vm.cancelDownload(it) },
@@ -271,6 +269,7 @@ private fun RepoErrorContent(message: String, onRetry: () -> Unit) {
 @Composable
 private fun RepoListContent(
     assets: List<RootfsAsset>,
+    isFiltered: Boolean,
     downloadStates: Map<String, AssetDownloadState>,
     onDownload: (RootfsAsset) -> Unit,
     onCancel: (RootfsAsset) -> Unit,
@@ -292,11 +291,15 @@ private fun RepoListContent(
                 onRetry    = { onRetry(asset) }
             )
         }
-        // Footer: banner at end of list so it's visible when user scrolls to bottom
-        item {
-            Spacer(Modifier.height(8.dp))
-            RepoSourceBanner()
-            Spacer(Modifier.height(12.dp))
+        // Footer: banner only when not filtering
+        if (!isFiltered) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                RepoSourceBanner()
+                Spacer(Modifier.height(12.dp))
+            }
+        } else {
+            item { Spacer(Modifier.height(12.dp)) }
         }
     }
 }
