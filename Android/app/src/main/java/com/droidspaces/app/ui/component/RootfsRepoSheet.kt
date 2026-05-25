@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -153,6 +154,9 @@ fun RootfsRepoSheet(
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     )
+                                    Spacer(Modifier.height(8.dp))
+                                    // Show banner in empty-state so it's visible even when no results
+                                    RepoSourceBanner()
                                 }
                             }
                         } else {
@@ -260,6 +264,12 @@ private fun RepoListContent(
                 onInstall  = onInstall,
                 onRetry    = { onRetry(asset) }
             )
+        }
+        // Footer: banner at end of list so it's visible when user scrolls to bottom
+        item {
+            Spacer(Modifier.height(8.dp))
+            RepoSourceBanner()
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -540,6 +550,45 @@ private fun RootfsAssetCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RepoSourceBanner() {
+    val context = LocalContext.current
+    val url = context.getString(R.string.repo_banner_url)
+
+    Surface(
+        onClick = {
+            context.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+            )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Text(
+                text = context.getString(R.string.repo_banner_text),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

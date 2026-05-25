@@ -505,6 +505,8 @@
     <string name="repo_title">Rootfs Repository</string>
     <string name="repo_fab_label">Repository</string>
     <string name="repo_refresh">Refresh</string>
+    <string name="repo_banner_text">These rootfs tarballs are open-source and transparent. You can manually download or inspect our changes by tapping this card.</string>
+    <string name="repo_banner_url">https://github.com/Droidspaces/Droidspaces-rootfs-builder</string>
     <string name="repo_failed_to_load">Failed to load repository</string>
     <string name="repo_download">Download</string>
     <string name="repo_cancel">Cancel</string>
