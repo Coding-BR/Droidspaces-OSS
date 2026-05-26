@@ -14,8 +14,10 @@ import com.droidspaces.app.util.RepoResult
 import com.droidspaces.app.util.RootfsAsset
 import com.droidspaces.app.util.RootfsDownloadManager
 import com.droidspaces.app.util.RootfsRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 sealed class RepoUiState {
@@ -53,15 +55,22 @@ class RootfsRepoViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             when (val result = RootfsRepository.fetchAllAssets(getApplication())) {
                 is RepoResult.Success -> {
+                    // Emit Success immediately so the UI renders and the
+                    // loading spinner stops — cards appear without delay.
+                    uiState = RepoUiState.Success(result.assets)
+
+                    // Heavy filesystem scan runs off the main thread so the
+                    // Compose frame loop stays unblocked during the lookup.
                     val ctx = getApplication<Application>()
-                    val prePopulated = result.assets.mapNotNull { asset ->
-                        val uri = findDownloadedUri(ctx, asset.uniqueFilename)
-                        if (uri != null) asset.downloadUrl to AssetDownloadState.Done(uri) else null
-                    }.toMap()
+                    val prePopulated = withContext(Dispatchers.Default) {
+                        result.assets.mapNotNull { asset ->
+                            val uri = findDownloadedUri(ctx, asset.uniqueFilename)
+                            if (uri != null) asset.downloadUrl to AssetDownloadState.Done(uri) else null
+                        }.toMap()
+                    }
                     // Only preserve active downloads; Done/Failed states are re-derived
                     // from the filesystem via prePopulated so deleted files revert to Idle
                     downloadStates = prePopulated + downloadStates.filter { it.value is AssetDownloadState.Downloading }
-                    uiState = RepoUiState.Success(result.assets)
                 }
                 is RepoResult.Error -> uiState = RepoUiState.Error(result.message)
             }

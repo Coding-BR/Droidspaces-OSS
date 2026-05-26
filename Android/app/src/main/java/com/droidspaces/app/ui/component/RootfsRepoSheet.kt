@@ -1,7 +1,7 @@
 package com.droidspaces.app.ui.component
 
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -120,17 +120,10 @@ fun RootfsRepoSheet(
                 }
                 // Refresh
                 IconButton(onClick = { vm.load() }, enabled = !isLoading) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = context.getString(R.string.repo_refresh)
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = context.getString(R.string.repo_refresh)
+                    )
                 }
             }
 
@@ -669,11 +662,10 @@ private fun RepoManagerDialog(
     var repos by remember { mutableStateOf(initialRepos) }
     val originalUrls = remember { initialRepos.map { it.second }.toSet() }
 
-    var showAddForm  by remember { mutableStateOf(false) }
-    var newName      by remember { mutableStateOf("") }
-    var newUrl       by remember { mutableStateOf("") }
-    var nameError    by remember { mutableStateOf("") }
-    var urlError     by remember { mutableStateOf("") }
+    var newName   by remember { mutableStateOf("") }
+    var newUrl    by remember { mutableStateOf("") }
+    var nameError by remember { mutableStateOf("") }
+    var urlError  by remember { mutableStateOf("") }
 
     val fieldShape  = RoundedCornerShape(14.dp)
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -682,6 +674,21 @@ private fun RepoManagerDialog(
         unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         focusedContainerColor   = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
     )
+
+    fun tryAdd() {
+        val n = newName.trim(); val u = newUrl.trim()
+        nameError = if (n.isEmpty()) context.getString(R.string.repo_custom_name_empty) else ""
+        urlError = when {
+            u.isEmpty()               -> context.getString(R.string.repo_custom_url_empty)
+            !u.startsWith("https://") -> context.getString(R.string.repo_custom_url_invalid)
+            repos.any { it.second == u } -> context.getString(R.string.repo_custom_url_invalid)
+            else -> ""
+        }
+        if (nameError.isEmpty() && urlError.isEmpty()) {
+            repos = repos + (n to u)
+            newName = ""; newUrl = ""
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -717,25 +724,12 @@ private fun RepoManagerDialog(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 Spacer(Modifier.height(8.dp))
 
-                // Repo list
-                if (repos.isEmpty() && !showAddForm) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = context.getString(R.string.repo_no_custom),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                        )
-                    }
-                } else {
+                // Existing repo list
+                if (repos.isNotEmpty()) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 260.dp),
+                            .heightIn(max = 200.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(repos, key = { _, item -> item.second }) { _, (repoName, repoUrl) ->
@@ -781,102 +775,78 @@ private fun RepoManagerDialog(
                             }
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                    Spacer(Modifier.height(12.dp))
                 }
+
+                // Inline add-repo form — always visible, no animation toggle
+                Text(
+                    text = context.getString(R.string.repo_add_custom),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it; nameError = "" },
+                    label = { Text(context.getString(R.string.repo_custom_name_hint)) },
+                    isError = nameError.isNotEmpty(),
+                    supportingText = if (nameError.isNotEmpty()) { { Text(nameError) } } else null,
+                    shape = fieldShape,
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = newUrl,
+                    onValueChange = { newUrl = it; urlError = "" },
+                    label = { Text(context.getString(R.string.repo_custom_url_hint)) },
+                    isError = urlError.isNotEmpty(),
+                    supportingText = if (urlError.isNotEmpty()) { { Text(urlError) } } else null,
+                    shape = fieldShape,
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
 
                 Spacer(Modifier.height(8.dp))
 
-                // Add form / Add button
-                AnimatedVisibility(visible = showAddForm) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = newName,
-                            onValueChange = { newName = it; nameError = "" },
-                            label = { Text(context.getString(R.string.repo_custom_name_hint)) },
-                            isError = nameError.isNotEmpty(),
-                            supportingText = if (nameError.isNotEmpty()) { { Text(nameError) } } else null,
-                            shape = fieldShape,
-                            colors = fieldColors,
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = newUrl,
-                            onValueChange = { newUrl = it; urlError = "" },
-                            label = { Text(context.getString(R.string.repo_custom_url_hint)) },
-                            isError = urlError.isNotEmpty(),
-                            supportingText = if (urlError.isNotEmpty()) { { Text(urlError) } } else null,
-                            shape = fieldShape,
-                            colors = fieldColors,
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        // Subscribe confirm row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable {
-                                    showAddForm = false; newName = ""; newUrl = ""; nameError = ""; urlError = ""
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                            ) {
-                                Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-                                    Text(context.getString(R.string.cancel), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-                            Surface(
-                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable {
-                                    val n = newName.trim(); val u = newUrl.trim()
-                                    nameError = if (n.isEmpty()) context.getString(R.string.repo_custom_name_empty) else ""
-                                    urlError = when {
-                                        u.isEmpty()               -> context.getString(R.string.repo_custom_url_empty)
-                                        !u.startsWith("https://") -> context.getString(R.string.repo_custom_url_invalid)
-                                        repos.any { it.second == u } -> context.getString(R.string.repo_custom_url_invalid)
-                                        else -> ""
-                                    }
-                                    if (nameError.isEmpty() && urlError.isEmpty()) {
-                                        repos = repos + (n to u)
-                                        newName = ""; newUrl = ""; showAddForm = false
-                                    }
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            ) {
-                                Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-                                    Text(context.getString(R.string.repo_custom_add), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimary)
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-
-                AnimatedVisibility(visible = !showAddForm) {
-                    val addBtnShape = RoundedCornerShape(14.dp)
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clip(addBtnShape).clickable { showAddForm = true },
-                        shape = addBtnShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                Surface(
+                    onClick = { tryAdd() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(6.dp))
-                            Text(context.getString(R.string.repo_add_custom), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = context.getString(R.string.repo_custom_add),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = context.getString(R.string.repo_custom_add),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
                     }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
-                // Footer buttons
+                // Single footer row: Close / Save
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Surface(
                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).clickable(onClick = onDismiss),
