@@ -20,11 +20,11 @@
 1. 使用镜像工具**解包 `vendor.img`**。
 2. **配置符号链接**：
     - 进入解包输出目录中的 `.repack_info` 隐藏文件夹。
-    - 将 [symlink-configuration/symlink_info.txt](./android-service/symlink-configuration/symlink_info.txt) 的内容追加到现有的 `symlink_info.txt`。
-    - 将 [symlink-configuration/fs-config.txt](./android-service/symlink-configuration/fs-config.txt) 的内容追加到现有的 `fs-config.txt`。
-    - 将 [symlink-configuration/file_contexts.txt](./android-service/symlink-configuration/file_contexts.txt) 的内容追加到现有的 `file_contexts.txt`。
+    - 将 [symlink-configuration/symlink_info.txt](android-service/symlink-configuration/symlink_info.txt) 的内容追加到现有的 `symlink_info.txt`。
+    - 将 [symlink-configuration/fs-config.txt](android-service/symlink-configuration/fs-config.txt) 的内容追加到现有的 `fs-config.txt`。
+    - 将 [symlink-configuration/file_contexts.txt](android-service/symlink-configuration/file_contexts.txt) 的内容追加到现有的 `file_contexts.txt`。
 3. **应用 SELinux 策略**：
-    - 将 [symlink-configuration/droidspaces_symlink.cil](./android-service/symlink-configuration/droidspaces_symlink.cil) 的内容追加到你的 `<解包文件夹>/etc/selinux/vendor_sepolicy.cil`。
+    - 将 [symlink-configuration/droidspaces_symlink.cil](android-service/symlink-configuration/droidspaces_symlink.cil) 的内容追加到你的 `<解包文件夹>/etc/selinux/vendor_sepolicy.cil`。
 
 ---
 
@@ -35,10 +35,10 @@
 2. **移入二进制文件**：将 `droidspaces` 二进制文件（arm64 静态编译）复制到 `<解包文件夹>/vendor/bin/droidspaces`。
 3. **配置权限**：
     - 进入 `.repack_info` 隐藏文件夹。
-    - 将 [binary-configuration/fs-config.txt](./android-service/binary-configuration/fs-config.txt) 的内容追加到 `fs-config.txt`。
-    - 将 [binary-configuration/file_contexts.txt](./android-service/binary-configuration/file_contexts.txt) 的内容追加到 `file_contexts.txt`。
+    - 将 [binary-configuration/fs-config.txt](android-service/binary-configuration/fs-config.txt) 的内容追加到 `fs-config.txt`。
+    - 将 [binary-configuration/file_contexts.txt](android-service/binary-configuration/file_contexts.txt) 的内容追加到 `file_contexts.txt`。
 4. **应用 SELinux 策略**：
-    - 将 [binary-configuration/droidspaces_binary.cil](./android-service/binary-configuration/droidspaces_binary.cil) 的内容追加到你的 `<解包文件夹>/etc/selinux/vendor_sepolicy.cil`。
+    - 将 [binary-configuration/droidspaces_binary.cil](android-service/binary-configuration/droidspaces_binary.cil) 的内容追加到你的 `<解包文件夹>/etc/selinux/vendor_sepolicy.cil`。
 
 ---
 
@@ -47,9 +47,9 @@
 无论选择哪种方法，你都必须执行以下步骤来注册服务：
 
 1. **注册 init 脚本**：
-   将 [init.droidspaces.rc](./android-service/vendor/etc/init/init.droidspaces.rc) 复制到 `<解包文件夹>/etc/init/`。
+   将 [init.droidspaces.rc](android-service/vendor/etc/init/init.droidspaces.rc) 复制到 `<解包文件夹>/etc/init/`。
 2. **添加自启脚本**：
-   将 [droidspaces_autoboot.sh](./android-service/vendor/bin/droidspaces_autoboot.sh) 复制到 `<解包文件夹>/vendor/bin/`。
+   将 [droidspaces_autoboot.sh](android-service/vendor/bin/droidspaces_autoboot.sh) 复制到 `<解包文件夹>/vendor/bin/`。
 3. **重新打包并刷写**：
    使用镜像工具重新打包 `vendor.img` 并通过 fastboot 刷写：
    ```bash
@@ -64,7 +64,7 @@
 > **文件系统一致性**：始终使用与原始镜像相同的文件系统类型进行重新打包（使用 `file vendor.img` 检查）。
 
 - **静默 SELinux 日志刷屏（强烈推荐）**：
-    虽然不是功能实现所必需，但我们强烈建议应用 [selinux-testing/ds_log_spam_fix.cil](./android-service/selinux-testing/ds_log_spam_fix.cil) 中的规则。
+    虽然不是功能实现所必需，但我们强烈建议应用 [selinux-testing/ds_log_spam_fix.cil](android-service/selinux-testing/ds_log_spam_fix.cil) 中的规则。
     - **好处**：这可以减少 Droidspaces 在你的 `dmesg` 中产生的约 **90% 的 AVC 拒绝记录**，保持系统日志干净整洁。
     - **风险**：如下文所述，如果你的宿主机 SELinux 策略缺少某些域，应用此文件是引发 bootloop 的最常见原因。
 
