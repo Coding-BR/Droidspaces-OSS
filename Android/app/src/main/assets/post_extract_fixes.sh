@@ -112,6 +112,16 @@ if $TEST -f "$ROOTFS_PATH/usr/bin/systemctl" || $TEST -f "$ROOTFS_PATH/bin/syste
     # Mask systemd-journald-audit.socket to prevent deadlocks on Android kernels
     $LN -sf /dev/null "$ROOTFS_PATH/etc/systemd/system/systemd-journald-audit.socket"
 
+    # Nuke problematic iptables service
+    for f in \
+        "$ROOTFS_PATH/etc/systemd/system/iptables.service" \
+        "$ROOTFS_PATH/etc/systemd/scripts/iptables" \
+        "$ROOTFS_PATH/etc/systemd/scripts/iptables.stop" \
+        "$ROOTFS_PATH/etc/systemd/system/multi-user.target.wants/iptables.service"
+    do
+        $TEST -f "$f" && $RM -f "$f"
+    done
+
     # 02. Journald configuration (skip Audit, KMsg, etc)
     log "Optimizing journald for Android and applying hardening..."
     $CAT >> "$ROOTFS_PATH/etc/systemd/journald.conf" << 'EOT'
