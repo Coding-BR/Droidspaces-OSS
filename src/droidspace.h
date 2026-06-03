@@ -328,19 +328,21 @@ struct ds_config {
   int hw_access;          /* --hw-access */
   int gpu_mode;           /* --gpu: mirror GPU nodes into isolated tmpfs /dev */
   int termux_x11;         /* --termux-x11 (Android only) */
+  char *tx11_extra_flags; /* --tx11-flags "..." (heap, NULL if unset) */
   int virgl;              /* --virgl (Android only) */
-  int volatile_mode;      /* --volatile */
-  int disable_ipv6;       /* --disable-ipv6 */
-  int android_storage;    /* --enable-android-storage */
-  int selinux_permissive; /* --selinux-permissive */
-  int net_bridgeless;     /* Probe result: no CONFIG_BRIDGE, use PTP NAT */
-  int reboot_cycle;       /* 1 if we are in a reboot loop */
-  int force_cgroupv1;     /* --force-cgroupv1: use v1 even if v2 is available */
-  int block_nested_ns;    /* --block-nested-namespaces: fix VFS deadlock by
-                               blocking nested namespace creation */
-  int privileged_mask;    /* --privileged bitmask */
-  int format_output;      /* --format: machine-parseable output (KEY=VALUE) */
-  char prog_name[64];     /* argv[0] for logging */
+  char *virgl_extra_flags; /* --virgl-flags "..." (heap, NULL if unset) */
+  int volatile_mode;       /* --volatile */
+  int disable_ipv6;        /* --disable-ipv6 */
+  int android_storage;     /* --enable-android-storage */
+  int selinux_permissive;  /* --selinux-permissive */
+  int net_bridgeless;      /* Probe result: no CONFIG_BRIDGE, use PTP NAT */
+  int reboot_cycle;        /* 1 if we are in a reboot loop */
+  int force_cgroupv1;  /* --force-cgroupv1: use v1 even if v2 is available */
+  int block_nested_ns; /* --block-nested-namespaces: fix VFS deadlock by
+                            blocking nested namespace creation */
+  int privileged_mask; /* --privileged bitmask */
+  int format_output;   /* --format: machine-parseable output (KEY=VALUE) */
+  char prog_name[64];  /* argv[0] for logging */
 
   /* Runtime state */
   char volatile_dir[PATH_MAX];    /* temporary overlay dir */
@@ -486,6 +488,8 @@ int ds_config_add_bind(struct ds_config *cfg, const char *src, const char *dest,
 void free_config_binds(struct ds_config *cfg);
 void free_config_env_vars(struct ds_config *cfg);
 void free_config_unknown_lines(struct ds_config *cfg);
+int ds_split_flags(const char *str, char ***out_argv, int *out_argc);
+void ds_free_split_flags(char **argv, int argc);
 char *ds_config_auto_path(const char *rootfs_path);
 void apply_reset_config(struct ds_config *cfg, int cli_net_mode_set,
                         enum ds_net_mode cli_net_mode);

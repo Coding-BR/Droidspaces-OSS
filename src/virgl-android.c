@@ -56,7 +56,8 @@ static void virgl_remove_pid(void) {
 /* ---- daemon child ----------------------------------------------------- */
 
 /* ready_fd: O_CLOEXEC write-end; EOF on execv success, byte on failure */
-static void __attribute__((noreturn)) virgl_child(int ready_fd) {
+static void __attribute__((noreturn)) virgl_child(int ready_fd, char **extra,
+                                                  int extra_argc) {
   /* Ignore hangups, keyboard interrupts, and broken pipes to make the server
    * process robust and persistent (except for SIGTERM which we use to stop it).
    */
@@ -75,9 +76,21 @@ static void __attribute__((noreturn)) virgl_child(int ready_fd) {
   fprintf(stdout, "[VirGL] uid=%d starting server\n", (int)getuid());
   fflush(stdout);
 
-  char *argv[] = {TX11_VIRGL_BIN, NULL};
+  int total = 1 + extra_argc;
+  char **argv = malloc((size_t)(total + 1) * sizeof(char *));
+  if (!argv) {
+    if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
+    }
+    _exit(1);
+  }
+  argv[0] = TX11_VIRGL_BIN;
+  for (int i = 0; i < extra_argc; i++)
+    argv[1 + i] = extra[i];
+  argv[total] = NULL;
+
   execv(argv[0], argv);
   perror("[VirGL] execv");
+  free(argv);
   if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
   }
   _exit(1);
@@ -85,7 +98,19 @@ static void __attribute__((noreturn)) virgl_child(int ready_fd) {
 
 /* ---- spawn + log relay ------------------------------------------------ */
 
-static pid_t spawn_virgl(void) {
+static pid_t spawn_virgl(const char *extra_flags) {
+  /* Parse extra flags in the parent so rejection is visible on the terminal */
+  char **extra = NULL;
+  int extra_argc = 0;
+  if (extra_flags && extra_flags[0]) {
+    if (ds_split_flags(extra_flags, &extra, &extra_argc) < 0) {
+      ds_warn(
+          "VirGL: invalid virgl_extra_flags - launching without extra flags");
+      extra = NULL;
+      extra_argc = 0;
+    }
+  }
+
   int pipefd[2];
   if (pipe(pipefd) < 0) {
     ds_warn("[VirGL] pipe: %s", strerror(errno));
@@ -108,6 +133,7 @@ static pid_t spawn_virgl(void) {
     close(pipefd[1]);
     close(readyfd[0]);
     close(readyfd[1]);
+    ds_free_split_flags(extra, extra_argc);
     return -1;
   }
   if (child == 0) {
@@ -116,7 +142,7 @@ static pid_t spawn_virgl(void) {
     dup2(pipefd[1], STDOUT_FILENO);
     dup2(pipefd[1], STDERR_FILENO);
     close(pipefd[1]);
-    virgl_child(readyfd[1]);
+    virgl_child(readyfd[1], extra, extra_argc);
   }
 
   close(pipefd[1]);
@@ -125,13 +151,15 @@ static pid_t spawn_virgl(void) {
   /* EOF = exec succeeded; byte = exec failed */
   char rdy;
   if (read(readyfd[0], &rdy, 1) > 0) {
-    ds_error("[VirGL] execv failed -- server did not start");
+    ds_error("VirGL: execv failed - server did not start");
     waitpid(child, NULL, 0);
     close(readyfd[0]);
     close(pipefd[0]);
+    ds_free_split_flags(extra, extra_argc);
     return -1;
   }
   close(readyfd[0]);
+  ds_free_split_flags(extra, extra_argc);
 
   pid_t relay = fork();
   if (relay == 0) {
@@ -205,13 +233,13 @@ int ds_virgl_daemon_start(struct ds_config *cfg) {
   if (!cfg || !cfg->virgl || !is_android())
     return -1;
   if (getuid() != 0) {
-    ds_error("[VirGL] not running as root");
+    ds_error("VirGL: not running as root");
     return -1;
   }
 
   /* Check if binary exists */
   if (access(TX11_VIRGL_BIN, F_OK) != 0) {
-    ds_warn("[VirGL] server binary not found at %s - skipping start",
+    ds_warn("VirGL: server binary not found at %s - skipping start",
             TX11_VIRGL_BIN);
     return -1;
   }
@@ -228,7 +256,7 @@ int ds_virgl_daemon_start(struct ds_config *cfg) {
   unlink(TX11_VIRGL_SOCKET);
 
   ds_log("[VirGL] launching VirGL server (uid=%d)", (int)getuid());
-  pid_t child = spawn_virgl();
+  pid_t child = spawn_virgl(cfg->virgl_extra_flags);
   if (child > 0) {
     cfg->virgl_pid = child;
     virgl_write_pid(child);
@@ -276,7 +304,7 @@ static int bind_virgl_socket(const char *src, const char *dst, uid_t uid) {
     chmod(dst, 0666);
   }
   if (mount(src, dst, NULL, MS_BIND, NULL) != 0) {
-    ds_warn("[VirGL] failed to bind-mount socket: %s", strerror(errno));
+    ds_warn("VirGL: failed to bind-mount socket: %s", strerror(errno));
     return -1;
   }
   return 0;
@@ -295,7 +323,7 @@ int ds_setup_virgl_socket(struct ds_config *cfg) {
 
   struct stat st;
   if (stat(src, &st) != 0) {
-    ds_warn("[VirGL] socket not found at %s - skipping socket bridge", src);
+    ds_warn("VirGL: socket not found at %s - skipping socket bridge", src);
     return 0;
   }
 
@@ -304,7 +332,7 @@ int ds_setup_virgl_socket(struct ds_config *cfg) {
   if (bind_virgl_socket(src, DS_VIRGL_SOCKET, uid) < 0)
     return 0;
 
-  ds_log("VirGL: socket bind-mounted into container (uid=%d)", (int)uid);
+  ds_log("VirGL: socket bind-mounted into container");
 
   /* Set GALLIUM_DRIVER so mesa uses the virpipe backend for HW acceleration */
   setenv("GALLIUM_DRIVER", "virpipe", 1);

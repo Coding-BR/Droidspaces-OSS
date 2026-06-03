@@ -281,8 +281,14 @@ int ds_config_load(const char *config_path, struct ds_config *cfg) {
       cfg->gpu_mode = parse_bool(val);
     } else if (strcmp(key, "enable_termux_x11") == 0) {
       cfg->termux_x11 = parse_bool(val);
+    } else if (strcmp(key, "tx11_extra_flags") == 0) {
+      free(cfg->tx11_extra_flags);
+      cfg->tx11_extra_flags = val[0] ? strdup(val) : NULL;
     } else if (strcmp(key, "enable_virgl") == 0) {
       cfg->virgl = parse_bool(val);
+    } else if (strcmp(key, "virgl_extra_flags") == 0) {
+      free(cfg->virgl_extra_flags);
+      cfg->virgl_extra_flags = val[0] ? strdup(val) : NULL;
     } else if (strcmp(key, "selinux_permissive") == 0) {
       cfg->selinux_permissive = parse_bool(val);
     } else if (strcmp(key, "volatile_mode") == 0) {
@@ -616,7 +622,11 @@ static void ds_config_serialize_known(FILE *f, struct ds_config *cfg) {
   if (is_android()) {
     fprintf(f, "enable_android_storage=%d\n", cfg->android_storage);
     fprintf(f, "enable_termux_x11=%d\n", cfg->termux_x11);
+    if (cfg->tx11_extra_flags)
+      fprintf(f, "tx11_extra_flags=%s\n", cfg->tx11_extra_flags);
     fprintf(f, "enable_virgl=%d\n", cfg->virgl);
+    if (cfg->virgl_extra_flags)
+      fprintf(f, "virgl_extra_flags=%s\n", cfg->virgl_extra_flags);
   }
   fprintf(f, "enable_hw_access=%d\n", cfg->hw_access);
   fprintf(f, "enable_gpu_mode=%d\n", cfg->gpu_mode);
@@ -772,6 +782,8 @@ int ds_config_save(const char *config_path, struct ds_config *cfg) {
       free(buf_disk);
       free_config_binds(&disk_cfg);
       free_config_unknown_lines(&disk_cfg);
+      free(disk_cfg.tx11_extra_flags);
+      free(disk_cfg.virgl_extra_flags);
 
       if (is_equal) {
         if (!cfg->config_file_existed) {
@@ -926,6 +938,10 @@ void apply_reset_config(struct ds_config *cfg, int cli_net_mode_set,
 
   free_config_env_vars(cfg);
   free_config_binds(cfg);
+  free(cfg->tx11_extra_flags);
+  free(cfg->virgl_extra_flags);
+  cfg->tx11_extra_flags = NULL;
+  cfg->virgl_extra_flags = NULL;
   memset(cfg, 0, sizeof(*cfg));
 
   cfg->net_ready_pipe[0] = cfg->net_ready_pipe[1] = -1;

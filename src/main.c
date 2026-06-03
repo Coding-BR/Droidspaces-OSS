@@ -72,7 +72,10 @@ void print_usage(void) {
       "  -H, --hw-access           Enable direct hardware access (/dev nodes)\n"
       "      --gpu                 Enable GPU acceleration nodes\n"
       "  -X, --termux-x11          Configure Termux-X11 display support\n"
-      "      --virgl               Configure VirGL 3D acceleration support\n\n"
+      "      --tx11-flags=\"FLAGS\"    Extra flags passed to termux-x11\n"
+      "      --virgl               Configure VirGL 3D acceleration support\n"
+      "      --virgl-flags=\"FLAGS\"   Extra flags passed to "
+      "virgl_test_server_android\n\n"
 
       C_BOLD "Options (Security & Boot):" C_RESET "\n"
       "  -P, --selinux-permissive  Set host SELinux to permissive mode\n"
@@ -341,6 +344,7 @@ int main(int argc, char **argv) {
       {"foreground", no_argument, 0, 'f'},
       {"hw-access", no_argument, 0, 'H'},
       {"termux-x11", no_argument, 0, 'X'},
+      {"tx11-flags", required_argument, 0, 271},
       {"disable-ipv6", no_argument, 0, 'I'},
       {"enable-android-storage", no_argument, 0, 'S'},
       {"selinux-permissive", no_argument, 0, 'P'},
@@ -360,6 +364,7 @@ int main(int argc, char **argv) {
       {"nat-ip", required_argument, 0, 262},
       {"gpu", no_argument, 0, 263},
       {"virgl", no_argument, 0, 270},
+      {"virgl-flags", required_argument, 0, 272},
       {"reset", no_argument, 0, 256},
       {"format", no_argument, 0, 265},
       {"memory", required_argument, 0, 266},
@@ -592,8 +597,16 @@ int main(int argc, char **argv) {
     case 'X':
       cfg.termux_x11 = 1;
       break;
+    case 271:
+      free(cfg.tx11_extra_flags);
+      cfg.tx11_extra_flags = optarg[0] ? strdup(optarg) : NULL;
+      break;
     case 270:
       cfg.virgl = 1;
+      break;
+    case 272:
+      free(cfg.virgl_extra_flags);
+      cfg.virgl_extra_flags = optarg[0] ? strdup(optarg) : NULL;
       break;
     case 'I':
       cfg.disable_ipv6 = 1;
@@ -1183,5 +1196,7 @@ cleanup:
   free_config_unknown_lines(&cfg);
   free_config_env_vars(&cfg);
   free_config_binds(&cfg);
+  free(cfg.tx11_extra_flags);
+  free(cfg.virgl_extra_flags);
   return ret;
 }

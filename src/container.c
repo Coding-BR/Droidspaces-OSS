@@ -412,6 +412,12 @@ int start_rootfs(struct ds_config *cfg) {
             "Skipping.");
   if (cfg->termux_x11 && !is_android())
     ds_warn("--termux-x11 is only applicable on Android. Skipping.");
+  if (cfg->tx11_extra_flags && !is_android())
+    ds_warn("--tx11-flags is only applicable on Android. Skipping.");
+  if (cfg->virgl && !is_android())
+    ds_warn("--virgl is only applicable on Android. Skipping.");
+  if (cfg->virgl_extra_flags && !is_android())
+    ds_warn("--virgl-flags is only applicable on Android. Skipping.");
 
   /* If no hostname specified, default to container name */
   if (cfg->hostname[0] == '\0') {
@@ -2206,10 +2212,16 @@ int show_info(struct ds_config *cfg, int trust_cfg_pid) {
     else
       printf("HW_ACCESS=none\n");
 
-    if (is_android())
+    if (is_android()) {
       printf("TERMUX_X11=%d\n", cfg->termux_x11);
-    if (is_android())
+      if (cfg->tx11_extra_flags)
+        printf("TX11_FLAGS=%s\n", cfg->tx11_extra_flags);
+    }
+    if (is_android()) {
       printf("VIRGL=%d\n", cfg->virgl);
+      if (cfg->virgl_extra_flags)
+        printf("VIRGL_FLAGS=%s\n", cfg->virgl_extra_flags);
+    }
 
     if (access("/sys/fs/selinux/enforce", R_OK) == 0) {
       printf("SELINUX=%s\n",

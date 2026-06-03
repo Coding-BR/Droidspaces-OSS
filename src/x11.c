@@ -43,7 +43,7 @@ static const char *extract_mls(const char *ctx) {
 static int resolve_termux_uid(void) {
   FILE *f = fopen(TX11_PACKAGES, "r");
   if (!f) {
-    ds_warn("[X11] cannot open packages.list (%s)", TX11_PACKAGES);
+    ds_warn("Termux:X11: cannot open packages.list (%s)", TX11_PACKAGES);
     return -1;
   }
 
@@ -59,11 +59,12 @@ static int resolve_termux_uid(void) {
   fclose(f);
 
   if (uid < 0 || !x11_ok) {
-    ds_warn("[X11] termux or termux-x11 package missing");
+    ds_warn("Termux:X11: termux or termux-x11 package missing");
     return -1;
   }
   if (access(TX11_LOADER, F_OK) != 0) {
-    ds_warn("[X11] loader.apk not found");
+    ds_warn(
+        "Termux:X11: loader.apk not found. Is termux-x11 package installed?");
     return -1;
   }
   return uid;
@@ -110,8 +111,10 @@ static void x11_remove_pid(void) {
  * written + closed on failure so the parent knows exec failed.
  * This function never returns on success.
  */
-static void __attribute__((noreturn))
-xserver_child(int uid, const char *display, int ready_fd) {
+static void __attribute__((noreturn)) xserver_child(int uid,
+                                                    const char *display,
+                                                    int ready_fd, char **extra,
+                                                    int extra_argc) {
   /* Ignore hangups, keyboard interrupts, and broken pipes to make the server
    * process robust and persistent (except for SIGTERM which we use to stop it).
    */
@@ -205,12 +208,31 @@ xserver_child(int uid, const char *display, int ready_fd) {
   char nice[256];
   snprintf(nice, sizeof(nice), "--nice-name=termux-x11 com.termux.x11 %s",
            display);
-  char *argv[] = {
+
+  /* Base argv (7 slots: app_process … display + NULL) */
+  char *base_argv[] = {
       "/system/bin/app_process", "-Xnoimage-dex2oat",        "/",  nice,
       "com.termux.x11.Loader",   (char *)(uintptr_t)display, NULL,
   };
+  int base_argc = 6; /* not counting NULL */
+
+  /* Build final argv */
+  int total = base_argc + extra_argc;
+  char **argv = malloc((size_t)(total + 1) * sizeof(char *));
+  if (!argv) {
+    if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
+    }
+    _exit(1);
+  }
+  for (int i = 0; i < base_argc; i++)
+    argv[i] = base_argv[i];
+  for (int i = 0; i < extra_argc; i++)
+    argv[base_argc + i] = extra[i];
+  argv[total] = NULL;
+
   execv(argv[0], argv);
   perror("[X11] execv");
+  free(argv);
   if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
   }
   _exit(1);
@@ -222,7 +244,20 @@ xserver_child(int uid, const char *display, int ready_fd) {
  * Fork the xserver child and a log-relay grandchild writing to Logs/x11.log.
  * Returns the xserver PID, or -1 on error.
  */
-static pid_t spawn_xserver(int uid, const char *display) {
+static pid_t spawn_xserver(int uid, const char *display,
+                           const char *extra_flags) {
+  /* Parse extra flags in the parent so rejection is visible on the terminal */
+  char **extra = NULL;
+  int extra_argc = 0;
+  if (extra_flags && extra_flags[0]) {
+    if (ds_split_flags(extra_flags, &extra, &extra_argc) < 0) {
+      ds_warn("Termux:X11: invalid tx11_extra_flags - launching without extra "
+              "flags");
+      extra = NULL;
+      extra_argc = 0;
+    }
+  }
+
   int pipefd[2];
   if (pipe(pipefd) < 0) {
     ds_warn("[X11] pipe: %s", strerror(errno));
@@ -245,6 +280,7 @@ static pid_t spawn_xserver(int uid, const char *display) {
     close(pipefd[1]);
     close(readyfd[0]);
     close(readyfd[1]);
+    ds_free_split_flags(extra, extra_argc);
     return -1;
   }
   if (child == 0) {
@@ -253,7 +289,7 @@ static pid_t spawn_xserver(int uid, const char *display) {
     dup2(pipefd[1], STDOUT_FILENO);
     dup2(pipefd[1], STDERR_FILENO);
     close(pipefd[1]);
-    xserver_child(uid, display, readyfd[1]);
+    xserver_child(uid, display, readyfd[1], extra, extra_argc);
     /* unreachable; xserver_child never returns */
   }
 
@@ -263,13 +299,15 @@ static pid_t spawn_xserver(int uid, const char *display) {
   /* EOF = exec succeeded; byte = exec failed */
   char rdy;
   if (read(readyfd[0], &rdy, 1) > 0) {
-    ds_error("[X11] execv failed -- xserver did not start");
+    ds_error("Termux:X11: execv failed -- xserver did not start");
     waitpid(child, NULL, 0);
     close(readyfd[0]);
     close(pipefd[0]);
+    ds_free_split_flags(extra, extra_argc);
     return -1;
   }
   close(readyfd[0]);
+  ds_free_split_flags(extra, extra_argc);
 
   pid_t relay = fork();
   if (relay == 0) {
@@ -360,7 +398,7 @@ int ds_x11_daemon_start(struct ds_config *cfg) {
     return -1;
 
   ds_log("[X11] launching Termux-X11 server (uid=%d)", uid);
-  pid_t child = spawn_xserver(uid, TX11_DISPLAY_STR);
+  pid_t child = spawn_xserver(uid, TX11_DISPLAY_STR, cfg->tx11_extra_flags);
   if (child > 0) {
     cfg->x11_pid = child;
     x11_write_pid(child);
@@ -447,12 +485,12 @@ int ds_setup_x11_socket(struct ds_config *cfg) {
 
   struct stat st;
   if (stat(src_dir, &st) != 0) {
-    ds_warn("[X11] .X11-unix not found at %s - skipping socket bridge",
+    ds_warn("Termux:X11: .X11-unix not found at %s - skipping socket bridge",
             src_dir);
     return 0;
   }
   if (access(src, F_OK) != 0) {
-    ds_warn("[X11] " TX11_DISPLAY_SOCK
+    ds_warn("Termux:X11: " TX11_DISPLAY_SOCK
             " socket not found at %s - skipping socket bridge",
             src);
     return 0;

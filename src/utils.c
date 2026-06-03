@@ -2225,3 +2225,150 @@ int ds_multi_stop(const char *raw_names) {
   }
   return ret;
 }
+
+/* Shell metacharacters that must never appear in a flag token */
+static const char ds_shell_metachars[] = "$`;&|><(){}\\";
+
+/*
+ * Split a flags string into an argv array suitable for appending to execv.
+ * Tokens are split on whitespace; single and double quotes are supported for
+ * grouping tokens with embedded spaces.  Any token containing a shell
+ * metacharacter is rejected and -1 is returned.
+ *
+ * On success, *out_argv is a heap-allocated NULL-terminated array of
+ * heap-allocated strings and *out_argc is the count.
+ * Caller must free with ds_free_split_flags().
+ * Returns 0 on success, -1 on error (nothing allocated on error).
+ */
+int ds_split_flags(const char *str, char ***out_argv, int *out_argc) {
+  if (!str || !out_argv || !out_argc)
+    return -1;
+
+  *out_argv = NULL;
+  *out_argc = 0;
+
+  int cap = 0, count = 0;
+  char **argv = NULL;
+  const char *p = str;
+
+  while (*p) {
+    /* Skip whitespace between tokens */
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+      p++;
+    if (!*p)
+      break;
+
+    /* Accumulate one token (handles single/double quoting) */
+    char *tok = NULL;
+    size_t tok_len = 0, tok_cap = 0;
+
+    while (*p && !(*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
+      char c;
+      if (*p == '\'') {
+        /* Single-quoted: copy literally until closing ' */
+        p++;
+        while (*p && *p != '\'') {
+          c = *p++;
+          if (tok_len + 1 >= tok_cap) {
+            tok_cap = tok_cap ? tok_cap * 2 : 64;
+            char *tmp = realloc(tok, tok_cap);
+            if (!tmp) {
+              free(tok);
+              goto oom;
+            }
+            tok = tmp;
+          }
+          tok[tok_len++] = c;
+        }
+        if (*p == '\'')
+          p++;
+      } else if (*p == '"') {
+        /* Double-quoted: copy literally until closing " */
+        p++;
+        while (*p && *p != '"') {
+          c = *p++;
+          if (tok_len + 1 >= tok_cap) {
+            tok_cap = tok_cap ? tok_cap * 2 : 64;
+            char *tmp = realloc(tok, tok_cap);
+            if (!tmp) {
+              free(tok);
+              goto oom;
+            }
+            tok = tmp;
+          }
+          tok[tok_len++] = c;
+        }
+        if (*p == '"')
+          p++;
+      } else {
+        c = *p++;
+        if (tok_len + 1 >= tok_cap) {
+          tok_cap = tok_cap ? tok_cap * 2 : 64;
+          char *tmp = realloc(tok, tok_cap);
+          if (!tmp) {
+            free(tok);
+            goto oom;
+          }
+          tok = tmp;
+        }
+        tok[tok_len++] = c;
+      }
+    }
+
+    if (!tok_len) {
+      free(tok);
+      continue;
+    }
+
+    /* NUL-terminate */
+    if (tok_len + 1 > tok_cap) {
+      char *tmp = realloc(tok, tok_len + 1);
+      if (!tmp) {
+        free(tok);
+        goto oom;
+      }
+      tok = tmp;
+    }
+    tok[tok_len] = '\0';
+
+    /* Reject shell metacharacters */
+    if (strpbrk(tok, ds_shell_metachars)) {
+      ds_error("flags: rejected token with shell metachar: %s", tok);
+      free(tok);
+      ds_free_split_flags(argv, count);
+      return -1;
+    }
+
+    /* Grow argv array */
+    if (count >= cap) {
+      int new_cap = cap ? cap * 2 : 8;
+      char **tmp = realloc(argv, (size_t)(new_cap + 1) * sizeof(char *));
+      if (!tmp) {
+        free(tok);
+        goto oom;
+      }
+      argv = tmp;
+      cap = new_cap;
+    }
+    argv[count++] = tok;
+  }
+
+  if (argv)
+    argv[count] = NULL;
+
+  *out_argv = argv;
+  *out_argc = count;
+  return 0;
+
+oom:
+  ds_free_split_flags(argv, count);
+  return -1;
+}
+
+void ds_free_split_flags(char **argv, int argc) {
+  if (!argv)
+    return;
+  for (int i = 0; i < argc; i++)
+    free(argv[i]);
+  free(argv);
+}
