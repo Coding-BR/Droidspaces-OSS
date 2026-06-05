@@ -10,7 +10,7 @@ OUT_DIR     = output
 CC ?= cc
 
 # Get version from header
-VERSION := $(shell grep "DS_VERSION" $(SRC_DIR)/droidspace.h | awk '{print $$3}' | tr -d '"')
+VERSION := $(shell grep "DS_VERSION" $(SRC_DIR)/include/droidspace.h | awk '{print $$3}' | tr -d '"')
 
 # Parallel jobs - use all available CPU cores
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
@@ -37,11 +37,11 @@ endif
 # Source files
 SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/utils.c \
-       $(SRC_DIR)/android.c \
+       $(SRC_DIR)/android/android.c \
        $(SRC_DIR)/seccomp.c \
        $(SRC_DIR)/mount.c \
        $(SRC_DIR)/cgroup.c \
-       $(SRC_DIR)/network.c \
+       $(SRC_DIR)/net/network.c \
        $(SRC_DIR)/terminal.c \
        $(SRC_DIR)/console.c \
        $(SRC_DIR)/pid.c \
@@ -52,18 +52,18 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/environment.c \
        $(SRC_DIR)/documentation.c \
        $(SRC_DIR)/hardware.c \
-       $(SRC_DIR)/ds_iptables.c \
-       $(SRC_DIR)/ds_netlink.c \
-       $(SRC_DIR)/ds_dhcp.c \
+       $(SRC_DIR)/net/iptables.c \
+       $(SRC_DIR)/net/netlink.c \
+       $(SRC_DIR)/net/dhcp.c \
        $(SRC_DIR)/daemon.c \
        $(SRC_DIR)/check.c \
-       $(SRC_DIR)/x11.c \
-       $(SRC_DIR)/virgl-android.c \
-       $(SRC_DIR)/pulseaudio-android.c \
+       $(SRC_DIR)/android/x11.c \
+       $(SRC_DIR)/android/virgl.c \
+       $(SRC_DIR)/android/pulseaudio.c \
        $(SRC_DIR)/virtualize.c
 
 # Compiler flags - hardened warning set, all warnings are errors
-CFLAGS  = -Wall -Wextra -Wpedantic -Werror -O2 -flto=auto -std=gnu99 -I$(SRC_DIR) -no-pie -pthread
+CFLAGS  = -Wall -Wextra -Wpedantic -Werror -O2 -flto=auto -std=gnu99 -I$(SRC_DIR)/include -no-pie -pthread
 CFLAGS += -Wformat=2 -Wformat-security -Wformat-overflow=2 -Wformat-truncation=2
 CFLAGS += -Wnull-dereference -Wcast-qual -Wlogical-op -Wshadow -Wdouble-promotion -Wundef
 CFLAGS += -Wduplicated-cond -Wduplicated-branches -Wimplicit-fallthrough=3
@@ -138,6 +138,7 @@ $(OBJ_DIR):
 # Compile each source file to an object - runs in parallel via -j$(NPROC)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(msg_cc)
+	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) -c $< -o $@
 
 # Link step

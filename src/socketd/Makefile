@@ -30,7 +30,7 @@ endif
 
 CXXFLAGS ?= -Wall -Wextra -Wpedantic -Werror \
             -O2 -std=c++17 \
-            -I$(SRC_DIR) -I$(API_DIR)
+            -I$(SRC_DIR) -I$(API_DIR)/include
 
 LDFLAGS ?=
 LDLIBS   ?=

@@ -4,7 +4,7 @@
 #include "container_inspect.h"
 #include "snapshot_lists.h"
 #include "event_log.h"
-#include "../droidspace.h"
+#include "droidspace.h"
 
 #include <arpa/inet.h>
 #include <cerrno>
