@@ -1,7 +1,10 @@
 package com.droidspaces.app.ui.screen
 
+import android.app.Activity
+import android.content.Context
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -19,31 +22,67 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.droidspaces.app.wayland.WaylandDisplayView
 import com.droidspaces.app.wayland.WaylandManager
 import com.droidspaces.app.wayland.WaylandSurface
 
 /**
- * Fullscreen Wayland compositor display.
+ * Wayland compositor display.
  *
- * Design: matches ContainerTerminalScreen — surfaceContainerLow TopAppBar,
- * back pops without stopping the compositor.
+ * Fullscreen mode:
+ *   - TopAppBar slides away (AnimatedVisibility)
+ *   - Status bar + nav bar hidden via WindowInsetsControllerCompat
+ *     (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE — swipe to peek, auto-hides)
+ *   - Restored immediately on exit-fullscreen or navigate-back
  *
- * Bottom toolbar provides: fullscreen toggle, software keyboard toggle,
- * ESC / TAB / CTRL / ALT, and arrow keys — all routed via nativeOnKeyEvent.
+ * IME / keyboard:
+ *   - Bottom toolbar has a keyboard toggle button (shows/hides soft keyboard)
+ *   - Display area uses imePadding() so the compositor resizes with the IME
+ *   - SUP key replaced with keyboard toggle icon
  *
- * Fullscreen: hides the TopAppBar so the compositor fills the display.
- * Back in fullscreen exits fullscreen first, then navigates back.
+ * Bottom toolbar: fullscreen ▏ ESC TAB CTRL ALT ▏ ⌨ ▏ ↑ ↓ ← →
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WaylandScreen(onNavigateBack: () -> Unit) {
-    val isRunning     = WaylandManager.isRunning
-    var isFullscreen  by remember { mutableStateOf(false) }
+    val isRunning        = WaylandManager.isRunning
+    var isFullscreen     by remember { mutableStateOf(false) }
+
+    val view             = LocalView.current
+
+    // Derive the WindowInsetsController once from the hosting Activity's window.
+    val insetsController = remember(view) {
+        val activity = view.context as? Activity ?: return@remember null
+        WindowCompat.getInsetsController(activity.window, view)
+    }
+
+    // Sync system-bar visibility with fullscreen state.
+    LaunchedEffect(isFullscreen) {
+        insetsController?.let { ctrl ->
+            if (isFullscreen) {
+                ctrl.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                ctrl.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                ctrl.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    // Always restore bars when the screen leaves composition.
+    DisposableEffect(insetsController) {
+        onDispose {
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     BackHandler {
         if (isFullscreen) isFullscreen = false else onNavigateBack()
@@ -51,7 +90,7 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ── TopAppBar (hidden in fullscreen) ────────────────────────────────
+        // ── TopAppBar ────────────────────────────────────────────────────────
         AnimatedVisibility(
             visible = !isFullscreen,
             enter   = expandVertically(),
@@ -62,10 +101,10 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
                     title = {
                         Text(
                             "Wayland Display",
-                            style    = MaterialTheme.typography.titleMedium,
+                            style      = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis,
                         )
                     },
                     navigationIcon = {
@@ -100,10 +139,14 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
             }
         }
 
-        // ── Display area ─────────────────────────────────────────────────────
+        // ── Display area (resizes with IME) ──────────────────────────────────
         Box(
-            modifier          = Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surface),
-            contentAlignment  = Alignment.Center,
+            modifier         = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .imePadding()   // shrinks when soft keyboard is open
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center,
         ) {
             if (isRunning) {
                 WaylandDisplayView(modifier = Modifier.fillMaxSize())
@@ -117,6 +160,11 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
             WaylandKeyboardBar(
                 isFullscreen       = isFullscreen,
                 onFullscreenToggle = { isFullscreen = !isFullscreen },
+                onKeyboardToggle   = {
+                    val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                            as? InputMethodManager
+                    imm?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                },
             )
         }
     }
@@ -128,9 +176,10 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
 private fun WaylandKeyboardBar(
     isFullscreen: Boolean,
     onFullscreenToggle: () -> Unit,
+    onKeyboardToggle: () -> Unit,
 ) {
     Surface(
-        color         = MaterialTheme.colorScheme.surfaceContainerLow,
+        color          = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 0.dp,
     ) {
         Column {
@@ -144,7 +193,7 @@ private fun WaylandKeyboardBar(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                // Fullscreen
+                // Fullscreen toggle
                 WlIconKey(
                     icon    = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                     desc    = if (isFullscreen) "Exit fullscreen" else "Fullscreen",
@@ -158,13 +207,19 @@ private fun WaylandKeyboardBar(
                 WlTextKey("TAB",  KeyEvent.KEYCODE_TAB)
                 WlTextKey("CTRL", KeyEvent.KEYCODE_CTRL_LEFT)
                 WlTextKey("ALT",  KeyEvent.KEYCODE_ALT_LEFT)
-                WlTextKey("SUP",  KeyEvent.KEYCODE_META_LEFT)
+
+                // Keyboard toggle (replaces SUP)
+                WlIconKey(
+                    icon    = Icons.Default.Keyboard,
+                    desc    = "Toggle keyboard",
+                    onClick = onKeyboardToggle,
+                )
 
                 VerticalDivider(modifier = Modifier.height(26.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Arrow keys
-                WlIconKey(Icons.Default.KeyboardArrowUp,                  "↑", keyCode = KeyEvent.KEYCODE_DPAD_UP)
-                WlIconKey(Icons.Default.KeyboardArrowDown,                "↓", keyCode = KeyEvent.KEYCODE_DPAD_DOWN)
+                WlIconKey(Icons.Default.KeyboardArrowUp,                "↑", keyCode = KeyEvent.KEYCODE_DPAD_UP)
+                WlIconKey(Icons.Default.KeyboardArrowDown,              "↓", keyCode = KeyEvent.KEYCODE_DPAD_DOWN)
                 WlIconKey(Icons.AutoMirrored.Filled.KeyboardArrowLeft,  "←", keyCode = KeyEvent.KEYCODE_DPAD_LEFT)
                 WlIconKey(Icons.AutoMirrored.Filled.KeyboardArrowRight, "→", keyCode = KeyEvent.KEYCODE_DPAD_RIGHT)
             }
@@ -172,13 +227,15 @@ private fun WaylandKeyboardBar(
     }
 }
 
+// ── Key button helpers ───────────────────────────────────────────────────────
+
 @Composable
 private fun RowScope.WlTextKey(label: String, keyCode: Int) {
     TextButton(
-        onClick         = { sendKey(keyCode) },
-        modifier        = Modifier.weight(1f).fillMaxHeight(),
-        shape           = RoundedCornerShape(8.dp),
-        contentPadding  = PaddingValues(0.dp),
+        onClick        = { sendKey(keyCode) },
+        modifier       = Modifier.weight(1f).fillMaxHeight(),
+        shape          = RoundedCornerShape(8.dp),
+        contentPadding = PaddingValues(0.dp),
     ) {
         Text(
             label,
@@ -216,17 +273,17 @@ private fun sendKey(keyCode: Int) {
 @Composable
 private fun CompositorOffPlaceholder(onNavigateBack: () -> Unit) {
     Column(
-        horizontalAlignment   = Alignment.CenterHorizontally,
-        verticalArrangement   = Arrangement.spacedBy(16.dp),
-        modifier              = Modifier.padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier            = Modifier.padding(32.dp),
     ) {
         Icon(
-            Icons.Default.DesktopWindows,
-            null,
+            Icons.Default.DesktopWindows, null,
             modifier = Modifier.size(48.dp),
             tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
         )
-        Text("Wayland compositor is not running", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("Wayland compositor is not running",
+            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "Enable it in Settings → Wayland Compositor, then come back here.",
             style = MaterialTheme.typography.bodyMedium,
