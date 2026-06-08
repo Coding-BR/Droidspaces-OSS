@@ -165,8 +165,6 @@
 #define DS_WL_HOST_SOCKET_OLDROOT DS_WL_RUNTIME_OLDROOT "/" DS_WL_SOCKET_NAME
 /* Staged under /run/droidspaces - immune to user-runtime-dir@0 overmounts */
 #define DS_WL_CONTAINER_SOCKET  "/run/droidspaces/" DS_WL_SOCKET_NAME
-/* XDG_RUNTIME_DIR injected into the container environment */
-#define DS_WL_CONTAINER_RUNTIME "/run/user/0"
 
 /* File Extensions */
 #define DS_EXT_PID ".pid"
