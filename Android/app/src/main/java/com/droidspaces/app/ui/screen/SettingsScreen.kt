@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import com.droidspaces.app.util.SymlinkInstaller
 import androidx.core.content.edit
+import com.droidspaces.app.util.Constants
+import com.droidspaces.app.wayland.WaylandManager
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -225,6 +227,26 @@ fun SettingsScreen(
                     prefsManager.isDaemonModeEnabled = checked
                 }
             )
+
+            // Wayland Compositor Toggle (arm64 only)
+            if (Constants.isArm64) {
+                val isWaylandRunning = WaylandManager.isRunning
+                SwitchItem(
+                    icon = Icons.Default.DesktopWindows,
+                    title = context.getString(R.string.wayland_compositor),
+                    summary = if (isWaylandRunning)
+                        WaylandManager.hostSocketPath(context)
+                    else
+                        context.getString(R.string.wayland_compositor_stopped),
+                    checked = isWaylandRunning,
+                    enabled = isRootAvailable,
+                    onCheckedChange = { checked ->
+                        if (checked) WaylandManager.start(context)
+                        else WaylandManager.stop()
+                        prefsManager.isWaylandCompositorEnabled = checked
+                    }
+                )
+            }
 
             val isBackendAvailable = appStateViewModel.isBackendAvailable
             SwitchItem(
