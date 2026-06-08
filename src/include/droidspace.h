@@ -163,9 +163,10 @@
 #define DS_WL_SOCKET_NAME      "wayland-1"
 #define DS_WL_HOST_SOCKET      DS_WL_RUNTIME_DIR "/" DS_WL_SOCKET_NAME
 #define DS_WL_HOST_SOCKET_OLDROOT DS_WL_RUNTIME_OLDROOT "/" DS_WL_SOCKET_NAME
-/* Container-side: standard XDG_RUNTIME_DIR location for root user */
+/* Staged under /run/droidspaces - immune to user-runtime-dir@0 overmounts */
+#define DS_WL_CONTAINER_SOCKET  "/run/droidspaces/" DS_WL_SOCKET_NAME
+/* XDG_RUNTIME_DIR injected into the container environment */
 #define DS_WL_CONTAINER_RUNTIME "/run/user/0"
-#define DS_WL_CONTAINER_SOCKET  DS_WL_CONTAINER_RUNTIME "/" DS_WL_SOCKET_NAME
 
 /* File Extensions */
 #define DS_EXT_PID ".pid"

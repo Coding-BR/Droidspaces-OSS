@@ -61,29 +61,16 @@ int ds_setup_wayland_socket(struct ds_config *cfg) {
     return -1;
   }
 
-  /* Create the container-side runtime dir with the correct permissions.
-   * /run/user/0 is the standard XDG_RUNTIME_DIR for root inside a container. */
-  if (mkdir_p(DS_WL_CONTAINER_RUNTIME, 0700) < 0 && errno != EEXIST) {
-    ds_warn("[Wayland] failed to create %s: %s", DS_WL_CONTAINER_RUNTIME,
-            strerror(errno));
-    return -1;
-  }
-  chmod(DS_WL_CONTAINER_RUNTIME, 0700);
-
-  /* Bind-mount the socket file into the container.  ds_bind_mount_socket()
-   * creates the destination file node, sets ownership + 0666, then bind-mounts. */
+  /* Stage socket under /run/droidspaces - immune to user-runtime-dir@0 overmounts.
+   * The rootfs-side systemd service re-binds it into /run/user/0/ after boot. */
   if (ds_bind_mount_socket(DS_WL_HOST_SOCKET_OLDROOT, DS_WL_CONTAINER_SOCKET,
-                           0 /* root owns it */, "Wayland") < 0) {
+                           0, "Wayland") < 0)
     return -1;
-  }
 
-  /* Inject WAYLAND_DISPLAY and XDG_RUNTIME_DIR so every container process
-   * (including init, login shells, and display managers) sees the compositor
-   * without any manual configuration. */
   setenv("WAYLAND_DISPLAY", DS_WL_SOCKET_NAME, 1);
   setenv("XDG_RUNTIME_DIR", DS_WL_CONTAINER_RUNTIME, 1);
 
-  ds_log("[Wayland] socket bridged: %s -> %s", DS_WL_HOST_SOCKET_OLDROOT,
+  ds_log("[Wayland] socket staged: %s -> %s", DS_WL_HOST_SOCKET_OLDROOT,
          DS_WL_CONTAINER_SOCKET);
   ds_log("Wayland: display is %s (XDG_RUNTIME_DIR=%s)", DS_WL_SOCKET_NAME,
          DS_WL_CONTAINER_RUNTIME);
