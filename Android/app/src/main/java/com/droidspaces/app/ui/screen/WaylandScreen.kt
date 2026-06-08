@@ -56,6 +56,8 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
     val isRunning        = WaylandManager.isRunning
     var isFullscreen     by remember { mutableStateOf(false) }
 
+    var isKeyboardVisible by remember { mutableStateOf(false) }
+
     val view             = LocalView.current
 
     // Derive the WindowInsetsController once from the hosting Activity's window.
@@ -159,11 +161,19 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
         if (isRunning) {
             WaylandKeyboardBar(
                 isFullscreen       = isFullscreen,
+                isKeyboardVisible  = isKeyboardVisible,
                 onFullscreenToggle = { isFullscreen = !isFullscreen },
                 onKeyboardToggle   = {
                     val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE)
                             as? InputMethodManager
-                    imm?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                    if (isKeyboardVisible) {
+                        imm?.hideSoftInputFromWindow(view.windowToken, 0)
+                        isKeyboardVisible = false
+                    } else {
+                        view.requestFocus()
+                        imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+                        isKeyboardVisible = true
+                    }
                 },
             )
         }
@@ -175,6 +185,7 @@ fun WaylandScreen(onNavigateBack: () -> Unit) {
 @Composable
 private fun WaylandKeyboardBar(
     isFullscreen: Boolean,
+    isKeyboardVisible: Boolean,
     onFullscreenToggle: () -> Unit,
     onKeyboardToggle: () -> Unit,
 ) {
@@ -210,7 +221,7 @@ private fun WaylandKeyboardBar(
 
                 // Keyboard toggle (replaces SUP)
                 WlIconKey(
-                    icon    = Icons.Default.Keyboard,
+                    icon    = if (isKeyboardVisible) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
                     desc    = "Toggle keyboard",
                     onClick = onKeyboardToggle,
                 )
