@@ -196,7 +196,7 @@ private fun RowScope.WlIconKey(
     onClick: (() -> Unit)? = null,
 ) {
     IconButton(
-        onClick  = onClick ?: { keyCode?.let { sendKey(it) } },
+        onClick  = onClick ?: { if (keyCode != null) sendKey(keyCode) },
         modifier = Modifier.weight(1f).fillMaxHeight(),
     ) {
         Icon(icon, desc, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
