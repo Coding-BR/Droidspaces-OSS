@@ -249,15 +249,7 @@ fun SettingsScreen(
                     }
                 )
 
-                // Open Display — only shown when compositor is running
-                if (isWaylandRunning) {
-                    SettingsRowCard(
-                        icon = Icons.Default.DesktopWindows,
-                        title = context.getString(R.string.wayland_open_display),
-                        subtitle = context.getString(R.string.wayland_open_display_summary),
-                        onClick = onNavigateToWaylandDisplay,
-                    )
-                }
+                // Open Display button removed — now lives at the top of the Panel tab
             }
 
             val isBackendAvailable = appStateViewModel.isBackendAvailable
