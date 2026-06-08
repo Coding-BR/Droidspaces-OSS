@@ -640,7 +640,7 @@ fun ContainerConfigScreen(
                 enabled = true
             )
 
-            ToggleCard(
+            if (Constants.isArm64) ToggleCard(
                 icon = Icons.Default.DesktopWindows,
                 title = context.getString(R.string.enable_wayland),
                 description = context.getString(R.string.enable_wayland_description),

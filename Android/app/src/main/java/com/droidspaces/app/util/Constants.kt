@@ -68,6 +68,12 @@ object Constants {
     // Pull-to-refresh animation delay (ms) - smooth refresh indicator animation
     const val PULL_TO_REFRESH_ANIMATION_DELAY = 200L
 
+    // Wayland compositor is only supported on arm64-v8a.
+    // Used to hide Wayland UI on unsupported architectures.
+    val isArm64: Boolean = android.os.Build.SUPPORTED_ABIS[0].let {
+        it.contains("arm64") || it.contains("aarch64")
+    }
+
     /**
      * Check if droidspaces binary is available in system PATH
      * Returns the command to use (either "droidspaces" if in PATH, or full path otherwise)
