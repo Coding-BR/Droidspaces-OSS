@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -161,10 +163,10 @@ private fun WaylandKeyboardBar(
                 VerticalDivider(modifier = Modifier.height(26.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Arrow keys
-                WlIconKey(Icons.Default.KeyboardArrowUp,    "↑", keyCode = KeyEvent.KEYCODE_DPAD_UP)
-                WlIconKey(Icons.Default.KeyboardArrowDown,  "↓", keyCode = KeyEvent.KEYCODE_DPAD_DOWN)
-                WlIconKey(Icons.Default.KeyboardArrowLeft,  "←", keyCode = KeyEvent.KEYCODE_DPAD_LEFT)
-                WlIconKey(Icons.Default.KeyboardArrowRight, "→", keyCode = KeyEvent.KEYCODE_DPAD_RIGHT)
+                WlIconKey(Icons.Default.KeyboardArrowUp,                  "↑", keyCode = KeyEvent.KEYCODE_DPAD_UP)
+                WlIconKey(Icons.Default.KeyboardArrowDown,                "↓", keyCode = KeyEvent.KEYCODE_DPAD_DOWN)
+                WlIconKey(Icons.AutoMirrored.Filled.KeyboardArrowLeft,  "←", keyCode = KeyEvent.KEYCODE_DPAD_LEFT)
+                WlIconKey(Icons.AutoMirrored.Filled.KeyboardArrowRight, "→", keyCode = KeyEvent.KEYCODE_DPAD_RIGHT)
             }
         }
     }

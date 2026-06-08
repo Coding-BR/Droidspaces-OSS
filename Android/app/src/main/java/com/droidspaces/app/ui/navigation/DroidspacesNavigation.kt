@@ -513,9 +513,6 @@ fun DroidspacesNavigation(
                 },
                 onNavigateToRequirements = {
                     navController.navigate(Screen.Requirements.route)
-                },
-                onNavigateToWaylandDisplay = {
-                    navController.navigate(Screen.WaylandDisplay.route)
                 }
             )
         }

@@ -70,7 +70,6 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToInstallation: () -> Unit = {},
     onNavigateToRequirements: () -> Unit = {},
-    onNavigateToWaylandDisplay: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
