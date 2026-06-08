@@ -68,11 +68,6 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
-        externalNativeBuild {
-            cmake {
-                path = file("src/main/jni/CMakeLists.txt")
-            }
-        }
     }
 
     signingConfigs {
@@ -179,6 +174,7 @@ android {
 
     externalNativeBuild {
         cmake {
+            path = "src/main/jni/CMakeLists.txt"
             version = "3.22.1"
         }
     }
