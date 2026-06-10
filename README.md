@@ -25,6 +25,7 @@ What makes Droidspaces unique is its **zero-dependency, native execution** on bo
 **Android** + **Linux Namespaces** = **Droidspaces**. Since Android is built on the Linux kernel, Droidspaces works seamlessly on Linux Desktop too. Both platforms are equally supported and maintained.
 
 > [!TIP]
+>
 > Check out [Community-supported Android devices](./Documentation/community-supported-devices.md) for a growing list of phones known to run Droidspaces.
 
 <details>
@@ -131,8 +132,6 @@ What makes Droidspaces unique is its **zero-dependency, native execution** on bo
 
 - [What is Droidspaces?](#what-is-droidspaces)
 - [Features](#features)
-- [Display, Audio & Desktop](#display-audio-desktop)
-- [Security & Isolation Philosophy](#security-model)
 - [Droidspaces vs The Alternatives](#droidspaces-vs-the-alternatives)
 - [Requirements](#requirements)
     - [Android](#a-android-devices)
@@ -143,10 +142,12 @@ What makes Droidspaces unique is its **zero-dependency, native execution** on bo
             - [GKI (Modern Kernels)](#GKI)
     - [Linux Desktop](#b-linux-desktop)
 - [Installation](#installation)
-- [Community-supported Android devices](./Documentation/community-supported-devices.md)
 - [Usage](#usage)
-- [Troubleshooting](./Documentation/Troubleshooting.md)
+- [Display, Audio & Desktop](#display-audio-desktop)
+- [Security & Isolation Philosophy](#security-model)
 - [Additional Documentation](#additional-documentation)
+- [Troubleshooting](./Documentation/Troubleshooting.md)
+- [Community-supported Android devices](./Documentation/community-supported-devices.md)
 - [Contributing](#contribution)
 - [Credits](#credits)
 
@@ -176,7 +177,7 @@ The entire runtime is a **single static binary** under 400KB, compiled against m
 | **Deep Android Integration** | Supports two daemon modes: **Native init.rc** (lowest-level integration with auto-spawn/unkillable persistence) and **Userspace Daemon** (app-togglable, starts via `post-fs-data.sh`, no image modification required). **Both modes bypass root-domain seccomp blocks to ensure stable container lifecycles** [[init.rc Developer Guide](./init/README.md)]. |
 | **Namespace Isolation** | Complete isolation via PID, MNT, UTS, IPC, and Cgroup namespaces. Each container has its own process tree, mount table, hostname, IPC resources, and cgroup hierarchy. |
 | **Network Isolation** | **3 Networking Modes (Host, NAT, None)**. Pure network isolation via `CLONE_NEWNET` (NAT/None modes) or shared host networking (Host mode). Works on both Android and Linux. |
-| **Android Display & GPU** | Three acceleration modes: **llvmpipe** (software, all devices), **VirGL** (Mali/PowerVR), and **Turnip** (native Qualcomm/Adreno). As of Droidspaces v6.3.0, the X server and VirGL server launch automatically when the container starts - zero manual Termux commands required. Environment variables (`DISPLAY=:5`, `GALLIUM_DRIVER=virpipe`) are injected automatically. [[More info](./Documentation/Graphics-and-Audio.md)] |
+| **Android Display & GPU** | Three acceleration modes: **llvmpipe** (software, all devices), **VirGL** (Mali/PowerVR), and **Turnip** (native Qualcomm/Adreno). As of v6.3.0, the X server and VirGL server launch automatically when the container starts - zero manual Termux commands required. Environment variables (`DISPLAY=:5`, `GALLIUM_DRIVER=virpipe`) are injected automatically. [[More info](./Documentation/Graphics-and-Audio.md)] |
 | **Android Sound** | PulseAudio daemon runs on the host as the Termux user so Android's audio HAL grants it device access. The socket is bind-mounted into the container at `/tmp/.pulse-socket` and `PULSE_SERVER` is injected automatically - audio just works. [[More info](./Documentation/Graphics-and-Audio.md#pulseaudio)] |
 | **Linux GPU Acceleration** | Zero-configuration GPU acceleration for AMD and Intel GPUs on Linux desktop hosts. [[More info](./Documentation/Graphics-and-Audio.md)] |
 | **Port Forwarding** | Forward host ports to the container in NAT mode (e.g., `--port 22:22`). Supports TCP and UDP, as well as ranges like `1-500:1-500`. |
@@ -195,49 +196,6 @@ The entire runtime is a **single static binary** under 400KB, compiled against m
 | **Cgroup Isolation (v1/v2)** | Per-container cgroup hierarchies (`/sys/fs/cgroup/droidspaces/<name>`) with full systemd compatibility. Supports both legacy v1 and modern v2 hierarchies. |
 | **Adaptive Security & Deadlock Shield** | Kernel-aware BPF filters resolve FBE keyring conflicts automatically on legacy kernels. A manual **Deadlock Shield** toggle is available to fix the specific VFS `grab_super()` deadlock on affected legacy devices (e.g., kernel 4.14.113). When the shield is disabled (default), Droidspaces grants full namespace freedom enabling features like **nested containers/Docker** natively on all kernels. |
 | **Privileged Mode** | Gain full access with the `--privileged` flag! Use with caution: do not report bugs when using this flag as it relaxes several security barriers for features like Flatpak/Bwrap/K3S. |
-
----
-
-<a id="display-audio-desktop"></a>
-
-## Display, Audio & Desktop
-
-As of v6.3.0, Droidspaces automatically launches the Termux:X11 X server, VirGL server, and PulseAudio daemon when the corresponding toggles are enabled in a container's configuration. The environment variables `DISPLAY=:5`, `GALLIUM_DRIVER=virpipe`, and `PULSE_SERVER` are injected into the container via `/run/droidspaces.env` before the init system finishes booting - displays, GPU acceleration, and audio all work without manual setup.
-
-Our official XFCE rootfs tarballs ship with **XFCE auto-boot** pre-wired: when Termux:X11 is enabled, XFCE launches automatically and appears in the Termux:X11 app - no terminal commands needed. Download from the [Rootfs Repository](./Documentation/Usage-Android-App.md#rootfs-repository) (search "XFCE") or from [Droidspaces Rootfs Builder Releases](https://github.com/Droidspaces/Droidspaces-rootfs-builder/releases/latest).
-
-For GPU acceleration methods, sound setup, DE auto-boot internals, and Linux desktop configuration, see the **[Display, Audio & Desktop Guide](./Documentation/Graphics-and-Audio.md)**.
-
----
-
-<a id="security-model"></a>
-
-## Security & Isolation Philosophy
-
-> [!IMPORTANT]
->
-> Droidspaces is a **privileged container runtime** built for **power users** who prioritize simplicity, performance, and native integration over complex, production-grade jailing.
->
-> To provide full systemd support, native hardware acceleration (GPU), and complex mounts/networking on Android, the container root needs real privileges. Even though Droidspaces does not use the heavily restricted "unprivileged" (User Namespace) mode, it applies several security layers:
-> - **Capability Dropping**: By default, Droidspaces drops high-risk capabilities (e.g., `CAP_SYS_MODULE`, `CAP_SYS_RAWIO`).
-> - **Mount Hardening**: Critical host paths are masked or remounted as read-only.
-> - **Seccomp Filters**: Common exploit vectors (like CVE-2026-31431 and malicious kernel module loading) are blocked by default.
-
-> [!WARNING]
->
-> **A Container is not a Jail**
-> If a process runs as **root** inside a Droidspaces container, it has significant power.
-> 
-> A malicious root user can attempt to escape or manipulate the host. **Droidspaces is not a sandbox for untrusted code.**
->
-> We focus on bringing a full Linux server experience to your pocket, not on building a production-grade fortress.
-
-> [!NOTE]
->
-> **Our Security Advice:**
-> 1. **Don't daily-drive root**: Just as you would on a standard Linux PC, create a normal user inside your container and use `sudo`.
-> 2. **Be Careful with Modes**: Flags like `--privileged` and `--hw-access` intentionally relax security barriers. Use them only when necessary.
-> 3. **Respect the Host**: If you compromise your container's root, you compromise your device.
 
 ---
 
@@ -380,6 +338,49 @@ sudo ./droidspaces check
 
 ---
 
+<a id="display-audio-desktop"></a>
+
+## Display, Audio & Desktop
+
+As of v6.3.0, Droidspaces automatically launches the Termux:X11 X server, VirGL server, and PulseAudio daemon when the corresponding toggles are enabled in a container's configuration. The environment variables `DISPLAY=:5`, `GALLIUM_DRIVER=virpipe`, and `PULSE_SERVER` are injected into the container via `/run/droidspaces.env` before the init system finishes booting - displays, GPU acceleration, and audio all work without manual setup.
+
+Our official XFCE rootfs tarballs ship with **XFCE auto-boot** pre-wired: when Termux:X11 is enabled, XFCE launches automatically and appears in the Termux:X11 app - no terminal commands needed. Download from the [Rootfs Repository](./Documentation/Usage-Android-App.md#rootfs-repository) (search "XFCE") or from [Droidspaces Rootfs Builder Releases](https://github.com/Droidspaces/Droidspaces-rootfs-builder/releases/latest).
+
+For GPU acceleration methods, sound setup, DE auto-boot internals, and Linux desktop configuration, see the **[Display, Audio & Desktop Guide](./Documentation/Graphics-and-Audio.md)**.
+
+---
+
+<a id="security-model"></a>
+
+## Security & Isolation Philosophy
+
+> [!IMPORTANT]
+>
+> Droidspaces is a **privileged container runtime** built for **power users** who prioritize simplicity, performance, and native integration over complex, production-grade jailing.
+>
+> To provide full systemd support, native hardware acceleration (GPU), and complex mounts/networking on Android, the container root needs real privileges. Even though Droidspaces does not use the heavily restricted "unprivileged" (User Namespace) mode, it applies several security layers:
+> - **Capability Dropping**: By default, Droidspaces drops high-risk capabilities (e.g., `CAP_SYS_MODULE`, `CAP_SYS_RAWIO`).
+> - **Mount Hardening**: Critical host paths are masked or remounted as read-only.
+> - **Seccomp Filters**: Common exploit vectors (like CVE-2026-31431 and malicious kernel module loading) are blocked by default.
+
+> [!WARNING]
+>
+> **A Container is not a Jail**
+> If a process runs as **root** inside a Droidspaces container, it has significant power.
+> 
+> A malicious root user can attempt to escape or manipulate the host. **Droidspaces is not a sandbox for untrusted code.**
+>
+> We focus on bringing a full Linux server experience to your pocket, not on building a production-grade fortress.
+
+> [!NOTE]
+>
+> **Our Security Advice:**
+> 1. **Don't daily-drive root**: Just as you would on a standard Linux PC, create a normal user inside your container and use `sudo`.
+> 2. **Be Careful with Modes**: Flags like `--privileged` and `--hw-access` intentionally relax security barriers. Use them only when necessary.
+> 3. **Respect the Host**: If you compromise your container's root, you compromise your device.
+
+---
+
 <a id="additional-documentation"></a>
 
 ## Additional Documentation
@@ -388,7 +389,7 @@ sudo ./droidspaces check
 |----------|-------------|
 | [Feature Deep Dives](Documentation/Features.md) | Detailed explanation of each major feature. |
 | [Display, Audio & Desktop Guide](Documentation/Graphics-and-Audio.md) | GPU acceleration, PulseAudio sound, and desktop environment auto-boot on Android and Linux. |
-| [Cool Things You Can Do (Tailscale, Docker, etc.)](Documentation/Cool-things-you-can-do.md) |
+| [Cool Things You Can Do (Tailscale, Docker, etc.)](Documentation/Cool-things-you-can-do.md) | Practical recipes for running Tailscale, Docker, and other tools inside containers. |
 | [Uninstallation Guide](Documentation/Uninstallation.md) | How to remove Droidspaces from your system. |
 
 ---
