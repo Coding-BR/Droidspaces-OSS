@@ -65,10 +65,6 @@ void print_usage(void) {
       "ds-NAME)\n"
       "      --nat-ip=IP           Assign a fixed IP in 172.28.*.* range (nat "
       "mode)\n"
-      "      --upstream IFACE      Upstream interface(s) (supports wildcards, "
-      "e.g. rmnet*)\n"
-      "                            e.g. --upstream wlan0 or --upstream "
-      "wlan0,rmnet*\n"
       "      --port [H:]C[/P]      Forward ports (supports ranges and "
       "symmetric ports)\n"
       "                            e.g. --port 22, 80:80/tcp, "
@@ -318,11 +314,7 @@ static void enforce_nat_safety(struct ds_config *cfg, int argc, char **argv) {
     }
   }
 
-  /* --upstream and --port are only meaningful with --net=nat */
-  if (cfg->upstream_iface_count > 0 && cfg->net_mode != DS_NET_NAT) {
-    ds_warn("--upstream is only valid with --net=nat - ignoring");
-    cfg->upstream_iface_count = 0;
-  }
+  /* --port is only meaningful with --net=nat */
   if (cfg->port_forward_count > 0 && cfg->net_mode != DS_NET_NAT) {
     ds_warn("--port is only valid with --net=nat - ignoring");
     cfg->port_forward_count = 0;
@@ -346,21 +338,6 @@ static void enforce_nat_safety(struct ds_config *cfg, int argc, char **argv) {
 
   if (cfg->net_mode != DS_NET_NAT)
     return;
-
-  /* --upstream is mandatory when using --net=nat */
-  if (cfg->upstream_iface_count == 0) {
-    printf("\n" C_RED C_BOLD "[ FATAL: --upstream REQUIRED ]" C_RESET "\n\n");
-    ds_error("--net=nat requires --upstream <interface(s)>\n"
-             "\n"
-             "  Specify the host interface(s) that provide internet access.\n"
-             "  The monitor will track whichever is currently active.\n"
-             "\n"
-             "  Examples:\n"
-             "    --upstream wlan0\n"
-             "    --upstream wlan0,rmnet0\n"
-             "    --upstream wlan0,rmnet0,ccmni1,v4-ccmni1");
-    exit(EXIT_FAILURE);
-  }
 
   char reason[512];
   int probe = ds_nl_probe_nat_capability(reason, sizeof(reason));
@@ -418,7 +395,6 @@ int main(int argc, char **argv) {
       {"user", required_argument, 0, 'u'},
       {"net", required_argument, 0, 257},
       {"port", required_argument, 0, 258},
-      {"upstream", required_argument, 0, 259},
       {"force-cgroupv1", no_argument, 0, 260},
       {"block-nested-namespaces", no_argument, 0, 261},
       {"privileged", required_argument, 0, 264},
@@ -967,52 +943,6 @@ int main(int argc, char **argv) {
       break;
     }
 
-    case 259: {
-      /* --upstream wlan0,rmnet0,ccmni1  (comma-separated list) */
-      char tmp[256];
-      strncpy(tmp, optarg, sizeof(tmp) - 1);
-      tmp[sizeof(tmp) - 1] = '\0';
-      char *saveptr2;
-      char *tok2 = strtok_r(tmp, ",", &saveptr2);
-      while (tok2) {
-        /* Trim leading/trailing whitespace */
-        while (*tok2 == ' ' || *tok2 == '\t')
-          tok2++;
-        char *end2 = tok2 + strlen(tok2) - 1;
-        while (end2 > tok2 && (*end2 == ' ' || *end2 == '\t'))
-          *end2-- = '\0';
-
-        if (tok2[0] == '\0') {
-          tok2 = strtok_r(NULL, ",", &saveptr2);
-          continue;
-        }
-        if (cfg.upstream_iface_count >= DS_MAX_UPSTREAM_IFACES) {
-          ds_error("Too many --upstream interfaces (max %d)",
-                   DS_MAX_UPSTREAM_IFACES);
-          ret = 1;
-          goto cleanup;
-        }
-        if (strlen(tok2) >= IFNAMSIZ) {
-          ds_error("Interface name too long: '%s' (max %d chars)", tok2,
-                   IFNAMSIZ - 1);
-          ret = 1;
-          goto cleanup;
-        }
-        int dup = 0;
-        for (int i = 0; i < cfg.upstream_iface_count; i++) {
-          if (strcmp(cfg.upstream_ifaces[i], tok2) == 0) {
-            dup = 1;
-            break;
-          }
-        }
-        if (!dup) {
-          safe_strncpy(cfg.upstream_ifaces[cfg.upstream_iface_count++], tok2,
-                       IFNAMSIZ);
-        }
-        tok2 = strtok_r(NULL, ",", &saveptr2);
-      }
-      break;
-    }
     case 260:
       /* --force-cgroupv1: escape hatch to legacy hierarchy */
       cfg.force_cgroupv1 = 1;

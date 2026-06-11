@@ -238,7 +238,7 @@ In Droidspaces NAT mode, Droidspaces acts *exactly like your home router* - but 
 - Droidspaces installs iptables `MASQUERADE` rules (that is the Linux name for the NAT target), plus FORWARD-accept and MSS-clamp rules so traffic actually flows
 - The container can reach the internet; the internet sees Android's IP, not the container's IP
 - Droidspaces also runs an embedded DHCP server for the container and configures its DNS
-- On Android, a background route monitor watches the upstream interfaces and re-points container traffic automatically when the active network changes (for example, Wi-Fi to mobile data handoff)
+- On Android, a background route monitor detects the active internet uplink automatically (by reading the kernel's routing rules) and re-points container traffic the moment the active network changes (for example, Wi-Fi to mobile data handoff)
 
 ---
 
@@ -379,7 +379,7 @@ Android host kernel
 **Step 1 - You start OpenWRT first (in NAT mode)**
 
 ```bash
-droidspaces --name=openwrt --rootfs=/data/openwrt --net=nat --upstream=wlan0 start
+droidspaces --name=openwrt --rootfs=/data/openwrt --net=nat start
 ```
 
 OpenWRT boots. It has:
@@ -588,7 +588,7 @@ Droidspaces enforces a few rules at startup and refuses to boot if they are viol
 
 Two more things to know:
 
-- `--upstream` and `--port` only make sense in NAT mode. In gateway mode they are ignored with a warning - port forwarding and upstream selection are the gateway container's job now.
+- `--port` only makes sense in NAT mode. In gateway mode it is ignored with a warning - port forwarding and uplink selection are the gateway container's job now.
 - When the host bridge name is auto-derived from `--gateway-net`, the name is sanitized (only letters, digits, `_`, `-` survive) and truncated to 9 characters, producing `ds-` plus at most 9 characters. If you need an exact bridge name, set it explicitly with `--gateway-bridge`.
 
 ---

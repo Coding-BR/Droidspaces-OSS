@@ -169,11 +169,9 @@ out_restore:
 }
 
 /* ---------------------------------------------------------------------------
- * Upstream routing globals - shared by android routing setup and monitor
+ * Uplink routing globals - shared by android routing setup and monitor
  * ---------------------------------------------------------------------------*/
 
-static char g_upstream_ifaces[DS_MAX_UPSTREAM_IFACES][IFNAMSIZ];
-static int g_upstream_count = 0;
 static int g_current_gw_table = 0;
 static pthread_mutex_t g_gw_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_route_monitor_sock = -1;
@@ -196,79 +194,39 @@ static int iface_is_running(const char *ifname) {
   return ret;
 }
 
-/* Returns 1 if `pattern` contains a glob wildcard character ('*' or '?').
- * Used to decide whether fnmatch() or strcmp() is appropriate. */
-static int is_wildcard_pattern(const char *pattern) {
-  return strchr(pattern, '*') != NULL || strchr(pattern, '?') != NULL;
-}
-
-/* Returns 1 if `iface` matches `pattern`.
- * If pattern is a plain name, falls back to strcmp for speed. */
-static int iface_matches_pattern(const char *pattern, const char *iface) {
-  if (is_wildcard_pattern(pattern))
-    return fnmatch(pattern, iface, 0) == 0;
-  return strcmp(pattern, iface) == 0;
-}
-
 /* ---------------------------------------------------------------------------
- * Android default network detection via kernel ip rules
+ * Built-in uplink classification (no user configuration)
  *
- * Android's netd inserts exactly one rule of the form:
- *   "<prio>: from all fwmark 0x0/0xffff iif lo lookup <iface>"
- * for the active default internet network. This rule is the kernel's
- * ground truth - it's set atomically when the default network changes
- * (wifi ↔ mobile data ↔ handoff).
+ * k_uplink_patterns: the only interface families that terminate internet
+ * access on Android, highest precedence first - Wi-Fi STA, ethernet
+ * adapters, CLAT (464xlat IPv4-over-IPv6), Qualcomm mobile data, MTK
+ * mobile data.
  *
- * IMS/MMS-only interfaces (rmnet_data1, rmnet_data6 etc) NEVER appear
- * in this rule - they use explicit fwmarks (0xd0064, 0xd0066 etc).
- * Only the true internet interface that Qualcomm IPA/MTK CCCI has
- * hardware reply sessions for will appear here.
- *
- * Returns 1 and fills iface_out (IFNAMSIZ) on success, 0 on failure.
+ * k_uplink_excludes: interfaces that must NEVER be picked as an uplink.
+ * swlan, ap, usb, rndis and ncm devices are created by Android to SHARE
+ * its connectivity downstream (hotspot / USB tethering - Android acts as
+ * the router, these face clients, not the internet).  tun/ppp are VPN
+ * tunnels which container traffic intentionally bypasses (see the
+ * DS_RULE_PRIO_* rationale in droidspace.h).  The rest are loopback,
+ * placeholders, and our own bridge/veth devices.
  * ---------------------------------------------------------------------------*/
-static int ds_net_get_android_default_iface_from_rules(char *iface_out) {
-  FILE *fp = popen("ip rule show 2>/dev/null", "r");
-  if (!fp)
-    return 0;
 
-  char line[512];
-  int found = 0;
+static const char *const k_uplink_patterns[] = {
+    "wlan*", "eth*", "v4-*", "rmnet*", "*ccmni*",
+};
 
-  while (fgets(line, sizeof(line), fp) && !found) {
-    /* Match lines containing both "fwmark 0x0/0xffff" and "iif lo" */
-    if (!strstr(line, "fwmark 0x0/0xffff"))
-      continue;
-    if (!strstr(line, "iif lo"))
-      continue;
+static const char *const k_uplink_excludes[] = {
+    "ds-*",   "lo",   "dummy*", "swlan*", "ap*",  "usb*",
+    "rndis*", "ncm*", "p2p*",   "tun*",   "ppp*", "bt-pan",
+};
 
-    char *lookup = strstr(line, "lookup ");
-    if (!lookup)
-      continue;
-    lookup += 7;
-
-    /* Copy interface name until whitespace/newline */
-    size_t i = 0;
-    while (lookup[i] && lookup[i] != ' ' && lookup[i] != '\n' &&
-           lookup[i] != '\r' && lookup[i] != '\t' && i < (size_t)(IFNAMSIZ - 1))
-      i++;
-    if (i == 0)
-      continue;
-
-    char iface[IFNAMSIZ];
-    memcpy(iface, lookup, i);
-    iface[i] = '\0';
-
-    /* Skip non-real interfaces */
-    if (strcmp(iface, "dummy0") == 0 || strcmp(iface, "lo") == 0 ||
-        strncmp(iface, "ds-", 3) == 0)
-      continue;
-
-    safe_strncpy(iface_out, iface, IFNAMSIZ);
-    found = 1;
+static int uplink_name_excluded(const char *ifname) {
+  for (size_t i = 0;
+       i < sizeof(k_uplink_excludes) / sizeof(k_uplink_excludes[0]); i++) {
+    if (fnmatch(k_uplink_excludes[i], ifname, 0) == 0)
+      return 1;
   }
-
-  pclose(fp);
-  return found;
+  return 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -526,40 +484,28 @@ int fix_networking_host(struct ds_config *cfg) {
 /* ---------------------------------------------------------------------------
  * Android-specific policy routing
  *
- * Iterates the user-declared upstream interfaces in priority order, finds the
- * first one that is RUNNING and has an IPv4 default route, then injects
- * low-priority ip rules to direct container traffic through that table.
- *
- * This replaces the old auto-detection approach which was unreliable on
- * Android MTK/Qualcomm because both wlan0 and mobile-data interfaces can
- * have simultaneous default routes in per-interface tables; only the policy
- * rules distinguish which is active, and parsing those rules was fragile.
+ * Detects the active uplink (the routing table netd designates as the
+ * default internet network), then injects low-priority ip rules to direct
+ * container traffic through that table.  Fully automatic - the route
+ * monitor keeps the rule in sync across wifi <-> mobile-data handoffs.
  * ---------------------------------------------------------------------------*/
 
 /* Forward declaration - defined later in this file after route monitor globals
  */
-static int find_active_upstream(ds_nl_ctx_t *ctx, char *iface_out,
-                                int *table_out);
+static int find_active_uplink(ds_nl_ctx_t *ctx, char *iface_out,
+                              int *table_out);
 
-static void ds_net_setup_android_routing(ds_nl_ctx_t *ctx,
-                                         const char ifaces[][IFNAMSIZ],
-                                         int iface_count) {
-  /* Temporarily populate the globals so find_active_upstream() can use them.
-   * setup_veth_host_side() copies these right after this call anyway. */
-  for (int _i = 0; _i < iface_count && _i < DS_MAX_UPSTREAM_IFACES; _i++)
-    safe_strncpy(g_upstream_ifaces[_i], ifaces[_i], IFNAMSIZ);
-  g_upstream_count = iface_count;
-
+static void ds_net_setup_android_routing(ds_nl_ctx_t *ctx) {
   char active_iface[IFNAMSIZ] = {0};
   int gw_table = 0;
-  find_active_upstream(ctx, active_iface, &gw_table);
+  find_active_uplink(ctx, active_iface, &gw_table);
 
   uint32_t subnet_be, mask_be;
   parse_cidr(DS_DEFAULT_SUBNET, &subnet_be, &mask_be);
   uint8_t prefix = DS_NAT_PREFIX;
 
   /* DS_RULE_PRIO_TO_SUBNET (6090): inbound traffic to our subnet always
-   * resolves via main table.  Install this even if no upstream is active
+   * resolves via main table.  Install this even if no uplink is active
    * yet - the monitor will handle the FROM rule once an interface comes up.
    *
    * Priority 6090 is:
@@ -573,15 +519,15 @@ static void ds_net_setup_android_routing(ds_nl_ctx_t *ctx,
             DS_RULE_PRIO_TO_SUBNET);
 
   if (!active_iface[0]) {
-    ds_warn("[NET] Android routing: no upstream interface is active yet - "
+    ds_warn("[NET] Android routing: no active uplink detected yet - "
             "route monitor will install rule when one comes up");
     return;
   }
 
-  ds_log("[NET] Android routing: active upstream %s → table %d", active_iface,
+  ds_log("[NET] Android routing: active uplink %s → table %d", active_iface,
          gw_table);
 
-  /* DS_RULE_PRIO_FROM_SUBNET (6100): traffic from our subnet → upstream
+  /* DS_RULE_PRIO_FROM_SUBNET (6100): traffic from our subnet → uplink
    * internet table.  Also above Android's VPN range so container-originated
    * traffic always routes through the physical uplink, not through any VPN
    * tunnel (the container has its own isolation layer). */
@@ -792,19 +738,9 @@ int setup_veth_host_side(struct ds_config *cfg, pid_t child_pid) {
   }
   ds_log("[DEBUG] Successfully moved %s to PID %d", veth_peer, (int)child_pid);
 
-  /* 7. Android policy routing - uses the user-declared upstream interfaces */
-  if (is_android()) {
-    ds_net_setup_android_routing(ctx,
-                                 (const char (*)[IFNAMSIZ])cfg->upstream_ifaces,
-                                 cfg->upstream_iface_count);
-  }
-
-  /* Cache the upstream list so ds_net_start_route_monitor() can access it.
-   * setup_veth_host_side() always runs before ds_net_start_route_monitor(). */
-  for (int _i = 0;
-       _i < cfg->upstream_iface_count && _i < DS_MAX_UPSTREAM_IFACES; _i++)
-    safe_strncpy(g_upstream_ifaces[_i], cfg->upstream_ifaces[_i], IFNAMSIZ);
-  g_upstream_count = cfg->upstream_iface_count;
+  /* 7. Android policy routing - uplink is detected automatically */
+  if (is_android())
+    ds_net_setup_android_routing(ctx);
 
   ds_nl_close(ctx);
 
@@ -1166,143 +1102,146 @@ int detect_ipv6_in_container(pid_t pid) {
 }
 
 /* ---------------------------------------------------------------------------
- * Upstream Route Monitor
+ * Uplink Route Monitor
  *
- * Watches LINK state and IPv4 address changes on the user-declared upstream
- * interfaces. When any change is detected that involves one of those
- * interfaces, it re-scans to find which is currently active (RUNNING + has
- * a default route) and atomically updates the policy rule.
+ * Watches FIB rule, route, link, and IPv4 address changes on the host.
+ * When a relevant change is detected it re-probes which uplink is currently
+ * active and atomically updates the container policy rule.  Fully automatic
+ * - no user-declared interface list.
  *
  * Event triggers:
- *   RTM_NEWLINK / RTM_DELLINK - interface state change (UP/RUNNING/DOWN)
- *   RTM_NEWADDR / RTM_DELADDR - IPv4 address assigned or removed
+ *   RTM_NEWRULE / RTM_DELRULE   - netd swaps the default-network rule
+ *                                 (this IS the wifi <-> mobile handoff)
+ *   RTM_NEWROUTE / RTM_DELROUTE - default route moved between tables
+ *   RTM_NEWLINK / RTM_DELLINK   - interface state change (UP/RUNNING/DOWN)
+ *   RTM_NEWADDR / RTM_DELADDR   - IPv4 address assigned or removed
  *
- * 30-second heartbeat covers devices with broken netlink notifications.
+ * A 1.5s heartbeat covers devices with broken netlink notifications and
+ * re-asserts ip_forward, which Android periodically resets.
  * ---------------------------------------------------------------------------*/
 
-/* Scan upstream interfaces in priority order; return the first that is
- * RUNNING and has an IPv4 default route in any table.
- *
- * Entries without wildcards are checked directly (fast path).
- * Entries containing '*' or '?' are expanded via a full RTM_GETLINK dump
- * and matched with fnmatch() - this handles dynamic interface names like
- * "*rmnet_data*" or "v4-rmnet_data*" on Qualcomm/CLAT devices where the
- * interface number changes on every reboot.
- *
- * Each wildcard pattern slot remembers the interface it last resolved to.
- * A discovery log fires only when the resolved name changes - this handles
- * cleanup (dead interfaces are overwritten), prevents log spam on heartbeat
- * reprobes, and uses zero dynamic allocation. */
+/* Last detected uplink interface.  Suppresses the "[NET] active uplink:"
+ * log line on every heartbeat - only log when the result changes. */
+static char g_last_uplink_iface[IFNAMSIZ];
 
-/* Per-pattern "last wildcard match" tracker.  Index matches g_upstream_ifaces.
- * An empty string means "never matched yet". */
-static char g_last_wildcard_match[DS_MAX_UPSTREAM_IFACES][IFNAMSIZ];
-
-/* Last interface returned by the ip rule probe.  Suppresses the
- * "[NET] Android default network:" log line on every 1.5s heartbeat -
- * only log when the interface actually changes. */
-static char g_last_iprule_iface[IFNAMSIZ];
-
-/* Set to 1 when we've already warned about ip rule probe failure.
- * Cleared when the probe succeeds again, so the next failure after
+/* Set to 1 when we've already warned that automatic detection found no
+ * uplink.  Cleared when a probe succeeds again, so the next failure after
  * a working period logs once more. */
-static int g_iprule_fail_warned;
+static int g_uplink_fail_warned;
 
-static int find_active_upstream(ds_nl_ctx_t *ctx, char *iface_out,
-                                int *table_out) {
-  /* On Android, use the kernel ip rule "fwmark 0x0/0xffff iif lo lookup
-   * <iface>" as the primary detection method.  This rule is set by netd
-   * for the active default internet network only - IMS/MMS-only interfaces
-   * (rmnet_data1, rmnet_data6 etc) never appear here.  This also ensures
-   * we pick the interface Qualcomm IPA / MTK CCCI has hardware reply
-   * sessions for, which is required for NAT'd forwarded traffic to work.
-   *
-   * This replaces the old priority-list-first approach which would pick
-   * the first RUNNING rmnet_data* with a default route - often an IMS
-   * interface that is RUNNING and has routes but whose IPA sessions only
-   * serve locally-originated Android traffic, not forwarded container
-   * packets. */
-  if (is_android()) {
-    char default_iface[IFNAMSIZ] = {0};
-    if (ds_net_get_android_default_iface_from_rules(default_iface) &&
-        default_iface[0] && iface_is_running(default_iface)) {
-      int tbl = 0;
-      if (ds_nl_get_iface_table(ctx, default_iface, &tbl) == 0) {
-        if (strcmp(g_last_iprule_iface, default_iface) != 0) {
-          ds_log("[NET] Android default network: %s (table %d) [ip rule]",
-                 default_iface, tbl);
-          safe_strncpy(g_last_iprule_iface, default_iface,
-                       sizeof(g_last_iprule_iface));
-        }
-        g_iprule_fail_warned = 0; /* reset so next failure logs once */
-        if (iface_out)
-          safe_strncpy(iface_out, default_iface, IFNAMSIZ);
-        if (table_out)
-          *table_out = tbl;
-        return 0;
-      }
-    }
-    if (!g_iprule_fail_warned) {
-      ds_warn("[NET] ip rule probe failed - falling back to priority list");
-      g_iprule_fail_warned = 1;
-    }
-    g_last_iprule_iface[0] = '\0';
+/* Basic sanity for a probe result: a real, carrier-up interface that is
+ * not loopback, not ours, and not a downstream/tether/VPN device. */
+static int uplink_candidate_ok(const char *ifname) {
+  if (!ifname[0])
+    return 0;
+  if (uplink_name_excluded(ifname))
+    return 0;
+  return iface_is_running(ifname);
+}
+
+static void log_uplink_change(const char *ifname, int table,
+                              const char *method) {
+  if (strcmp(g_last_uplink_iface, ifname) != 0) {
+    ds_log("[NET] Active uplink: %s (table %d) [%s]", ifname, table, method);
+    safe_strncpy(g_last_uplink_iface, ifname, sizeof(g_last_uplink_iface));
   }
+  g_uplink_fail_warned = 0; /* reset so next failure logs once */
+}
 
-  /* Non-Android path (or Android fallback): scan the user-declared
-   * upstream interface list in priority order. */
-  for (int i = 0; i < g_upstream_count; i++) {
-    const char *pattern = g_upstream_ifaces[i];
+/* Tier 3 (last resort): scan all interfaces against the built-in uplink
+ * whitelist in priority order; return the first that is RUNNING and has
+ * an IPv4 default route in some table. */
+static int scan_uplink_whitelist(ds_nl_ctx_t *ctx, char *iface_out,
+                                 int *table_out) {
+  char all_ifaces[64][IFNAMSIZ];
+  int all_count = ds_nl_list_ifaces(ctx, all_ifaces, 64);
 
-    if (!is_wildcard_pattern(pattern)) {
-      /* Fast path: literal name */
-      if (!iface_is_running(pattern))
+  for (size_t p = 0;
+       p < sizeof(k_uplink_patterns) / sizeof(k_uplink_patterns[0]); p++) {
+    for (int j = 0; j < all_count; j++) {
+      if (fnmatch(k_uplink_patterns[p], all_ifaces[j], 0) != 0)
+        continue;
+      if (!uplink_candidate_ok(all_ifaces[j]))
         continue;
       int tbl = 0;
-      if (ds_nl_get_iface_table(ctx, pattern, &tbl) == 0) {
-        if (iface_out)
-          safe_strncpy(iface_out, pattern, IFNAMSIZ);
-        if (table_out)
-          *table_out = tbl;
-        return 0;
-      }
-    } else {
-      /* Wildcard path: enumerate all real interfaces and fnmatch */
-      char all_ifaces[64][IFNAMSIZ];
-      int all_count = ds_nl_list_ifaces(ctx, all_ifaces, 64);
-      for (int j = 0; j < all_count; j++) {
-        if (!iface_matches_pattern(pattern, all_ifaces[j]))
-          continue;
-        /* Skip our own bridge/veth and loopback */
-        if (strncmp(all_ifaces[j], "ds-", 3) == 0)
-          continue;
-        if (strcmp(all_ifaces[j], "lo") == 0)
-          continue;
-        if (!iface_is_running(all_ifaces[j]))
-          continue;
-        int tbl = 0;
-        if (ds_nl_get_iface_table(ctx, all_ifaces[j], &tbl) == 0) {
-          /* Log only when the resolved interface changes for this pattern */
-          if (strcmp(g_last_wildcard_match[i], all_ifaces[j]) != 0) {
-            ds_log("[NET] Wildcard '%s' matched active interface '%s' "
-                   "(table %d)",
-                   pattern, all_ifaces[j], tbl);
-            safe_strncpy(g_last_wildcard_match[i], all_ifaces[j], IFNAMSIZ);
-          }
-          if (iface_out)
-            safe_strncpy(iface_out, all_ifaces[j], IFNAMSIZ);
-          if (table_out)
-            *table_out = tbl;
-          return 0;
-        }
-      }
+      if (ds_nl_get_iface_table(ctx, all_ifaces[j], &tbl) != 0)
+        continue;
+      if (iface_out)
+        safe_strncpy(iface_out, all_ifaces[j], IFNAMSIZ);
+      if (table_out)
+        *table_out = tbl;
+      return 0;
     }
   }
   return -ENOENT;
 }
 
-/* Re-probe which upstream is active and update the ip rule if needed. */
-static void do_upstream_reprobe(void) {
+/* Find the interface/table currently providing internet access.
+ * Fully automatic, three tiers, first hit wins:
+ *
+ *   1. Android netd default-network FIB rule (fwmark 0x0/0xffff iif lo).
+ *      The kernel's ground truth - swapped atomically on every handoff,
+ *      and never points at IMS/MMS-only interfaces.  Also the only
+ *      interface Qualcomm IPA / MTK CCCI has hardware reply sessions
+ *      for, which NAT'd forwarded traffic requires.
+ *   2. The main routing table's IPv4 default route - the standard Linux
+ *      case (what LXC/Docker implicitly rely on), and ROMs/chroots that
+ *      populate the main table.
+ *   3. Built-in whitelist scan of known uplink interface families.
+ *
+ * Returns 0 and fills iface_out (IFNAMSIZ) / table_out on success. */
+static int find_active_uplink(ds_nl_ctx_t *ctx, char *iface_out,
+                              int *table_out) {
+  char name[IFNAMSIZ] = {0};
+  int tbl = 0;
+
+  /* Tier 1: netd default-network rule (Android only - the rule simply
+   * does not exist elsewhere, but skip the dump cost off-Android). */
+  if (is_android() && ds_nl_get_android_default(ctx, name, &tbl) == 0 &&
+      uplink_candidate_ok(name)) {
+    log_uplink_change(name, tbl, "netd rule");
+    if (iface_out)
+      safe_strncpy(iface_out, name, IFNAMSIZ);
+    if (table_out)
+      *table_out = tbl;
+    return 0;
+  }
+
+  /* Tier 2: main-table default route (standard Linux semantics). */
+  name[0] = '\0';
+  if (ds_nl_get_table_default_oif(ctx, RT_TABLE_MAIN, name) == 0 &&
+      uplink_candidate_ok(name)) {
+    log_uplink_change(name, RT_TABLE_MAIN, "main table");
+    if (iface_out)
+      safe_strncpy(iface_out, name, IFNAMSIZ);
+    if (table_out)
+      *table_out = RT_TABLE_MAIN;
+    return 0;
+  }
+
+  /* Tier 3: built-in whitelist scan. */
+  name[0] = '\0';
+  tbl = 0;
+  if (scan_uplink_whitelist(ctx, name, &tbl) == 0) {
+    log_uplink_change(name, tbl, "whitelist scan");
+    if (iface_out)
+      safe_strncpy(iface_out, name, IFNAMSIZ);
+    if (table_out)
+      *table_out = tbl;
+    return 0;
+  }
+
+  if (!g_uplink_fail_warned) {
+    ds_warn("[NET] Uplink detection: no active internet interface found - "
+            "will keep probing");
+    g_uplink_fail_warned = 1;
+  }
+  g_last_uplink_iface[0] = '\0';
+  return -ENOENT;
+}
+
+/* Re-probe which uplink is active and update the ip rule if needed. */
+static void do_uplink_reprobe(void) {
   ds_nl_ctx_t *ctx = ds_nl_open();
   if (!ctx)
     return;
@@ -1310,8 +1249,8 @@ static void do_upstream_reprobe(void) {
   char new_iface[IFNAMSIZ] = {0};
   int new_table = 0;
 
-  if (find_active_upstream(ctx, new_iface, &new_table) != 0) {
-    /* No upstream active yet - leave current rule in place */
+  if (find_active_uplink(ctx, new_iface, &new_table) != 0) {
+    /* No uplink active yet - leave current rule in place */
     ds_nl_close(ctx);
     return;
   }
@@ -1325,7 +1264,7 @@ static void do_upstream_reprobe(void) {
     return;
   }
 
-  ds_log("[NET] Route monitor: upstream switch table %d → %d (%s)", old_table,
+  ds_log("[NET] Route monitor: uplink switch table %d → %d (%s)", old_table,
          new_table, new_iface);
 
   uint32_t subnet_be, mask_be;
@@ -1357,17 +1296,7 @@ static void do_upstream_reprobe(void) {
 static void *route_monitor_loop(void *arg) {
   (void)arg;
 
-  /* Build a comma-separated list for the log line */
-  /* DS_MAX_UPSTREAM_IFACES * (IFNAMSIZ + 1 for comma) + NUL */
-  char iface_list[DS_MAX_UPSTREAM_IFACES * (IFNAMSIZ + 1) + 1];
-  memset(iface_list, 0, sizeof(iface_list));
-  for (int i = 0; i < g_upstream_count; i++) {
-    if (i > 0)
-      strncat(iface_list, ",", sizeof(iface_list) - strlen(iface_list) - 1);
-    strncat(iface_list, g_upstream_ifaces[i],
-            sizeof(iface_list) - strlen(iface_list) - 1);
-  }
-  ds_log("[NET] Upstream route monitor started (interfaces: %s)", iface_list);
+  ds_log("[NET] Uplink route monitor started (automatic detection)");
 
   int sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
   if (sock < 0) {
@@ -1379,9 +1308,15 @@ static void *route_monitor_loop(void *arg) {
   struct sockaddr_nl sa;
   memset(&sa, 0, sizeof(sa));
   sa.nl_family = AF_NETLINK;
-  /* RTMGRP_LINK     - interface state changes (IFF_RUNNING, link up/down)
-   * RTMGRP_IPV4_IFADDR - IPv4 address add/remove on upstream interfaces */
-  sa.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR;
+  /* RTMGRP_LINK        - interface state changes (IFF_RUNNING, up/down)
+   * RTMGRP_IPV4_IFADDR - IPv4 address add/remove
+   * RTMGRP_IPV4_ROUTE  - default route moved between tables
+   * RTNLGRP_IPV4_RULE  - netd swapping the default-network FIB rule:
+   *                      this IS the wifi <-> mobile handoff signal.
+   *                      No legacy RTMGRP_ bitmask macro exists for rule
+   *                      groups; the bit is 1 << (RTNLGRP_IPV4_RULE - 1). */
+  sa.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV4_ROUTE |
+                 (1u << (RTNLGRP_IPV4_RULE - 1));
 
   if (bind(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
     ds_warn("[NET] Route monitor: failed to bind netlink socket: %s",
@@ -1424,7 +1359,7 @@ static void *route_monitor_loop(void *arg) {
     }
 
     if (pr == 0) {
-      do_upstream_reprobe();
+      do_uplink_reprobe();
       continue;
     }
 
@@ -1444,35 +1379,49 @@ static void *route_monitor_loop(void *arg) {
       if (h->nlmsg_type == NLMSG_DONE || h->nlmsg_type == NLMSG_ERROR)
         break;
 
-      if (h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK) {
-        /* Filter: care about events on declared upstream interfaces or any
-         * interface matching a wildcard pattern (e.g. "*rmnet_data*").
-         * A new rmnet_dataX popping up mid-session triggers a reprobe so
-         * the monitor can adopt the newly-active interface immediately. */
+      if (h->nlmsg_type == RTM_NEWRULE || h->nlmsg_type == RTM_DELRULE) {
+        /* FIB rule change - on Android this is netd switching the default
+         * network.  Always reprobe; the reprobe is idempotent so the echo
+         * of our own rule updates settles in one extra no-op pass. */
+        should_reprobe = 1;
+      } else if (h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK) {
+        /* Any real interface changing state may affect the uplink - e.g.
+         * a new rmnet_dataX popping up mid-session.  Only our own veths
+         * and loopback are noise. */
         struct ifinfomsg *ifi = NLMSG_DATA(h);
         char evname[IFNAMSIZ] = {0};
         if_indextoname((unsigned int)ifi->ifi_index, evname);
-        if (evname[0] && strncmp(evname, "ds-", 3) != 0) {
-          for (int i = 0; i < g_upstream_count; i++) {
-            if (iface_matches_pattern(g_upstream_ifaces[i], evname)) {
-              should_reprobe = 1;
-              break;
-            }
-          }
-        }
+        if (evname[0] && strncmp(evname, "ds-", 3) != 0 &&
+            strcmp(evname, "lo") != 0)
+          should_reprobe = 1;
       } else if (h->nlmsg_type == RTM_NEWADDR || h->nlmsg_type == RTM_DELADDR) {
         struct ifaddrmsg *ifa = NLMSG_DATA(h);
         if (ifa->ifa_family == AF_INET) {
           char evname[IFNAMSIZ] = {0};
           if_indextoname((unsigned int)ifa->ifa_index, evname);
-          if (evname[0] && strncmp(evname, "ds-", 3) != 0) {
-            for (int i = 0; i < g_upstream_count; i++) {
-              if (iface_matches_pattern(g_upstream_ifaces[i], evname)) {
-                should_reprobe = 1;
-                break;
-              }
-            }
+          if (evname[0] && strncmp(evname, "ds-", 3) != 0 &&
+              strcmp(evname, "lo") != 0)
+            should_reprobe = 1;
+        }
+      } else if (h->nlmsg_type == RTM_NEWROUTE ||
+                 h->nlmsg_type == RTM_DELROUTE) {
+        /* Default route added/removed in some table.  Filter our own
+         * subnet/bridge routes by output interface. */
+        struct rtmsg *rtm = NLMSG_DATA(h);
+        if (rtm->rtm_family == AF_INET) {
+          int oif = 0;
+          struct rtattr *rta = RTM_RTA(rtm);
+          int rlen = (int)RTM_PAYLOAD(h);
+          for (; RTA_OK(rta, rlen); rta = RTA_NEXT(rta, rlen)) {
+            if (rta->rta_type == RTA_OIF)
+              oif = *(int *)RTA_DATA(rta);
           }
+          char evname[IFNAMSIZ] = {0};
+          if (oif > 0)
+            if_indextoname((unsigned int)oif, evname);
+          if (!evname[0] ||
+              (strncmp(evname, "ds-", 3) != 0 && strcmp(evname, "lo") != 0))
+            should_reprobe = 1;
         }
       }
 
@@ -1480,8 +1429,17 @@ static void *route_monitor_loop(void *arg) {
         break;
     }
 
-    if (should_reprobe)
-      do_upstream_reprobe();
+    if (should_reprobe) {
+      /* Handoffs emit a burst of rule/route/addr events back-to-back.
+       * Drain the socket for a short window so the burst collapses into
+       * a single reprobe instead of one per event. */
+      struct pollfd dp = {.fd = sock, .events = POLLIN};
+      while (!g_stop_monitor && poll(&dp, 1, 200) > 0) {
+        if (recv(sock, buf, sizeof(buf), 0) <= 0)
+          break;
+      }
+      do_uplink_reprobe();
+    }
   }
 
   pthread_mutex_lock(&g_gw_mutex);
@@ -1489,7 +1447,7 @@ static void *route_monitor_loop(void *arg) {
   g_route_monitor_sock = -1;
   pthread_mutex_unlock(&g_gw_mutex);
 
-  ds_log("[NET] Upstream route monitor stopped");
+  ds_log("[NET] Uplink route monitor stopped");
   return NULL;
 }
 
@@ -1504,11 +1462,6 @@ void ds_net_stop_route_monitor(void) {
 void ds_net_start_route_monitor(void) {
   if (!is_android())
     return;
-
-  if (g_upstream_count == 0) {
-    ds_warn("[NET] Route monitor: no upstream interfaces defined, skipping");
-    return;
-  }
 
   g_stop_monitor = 0;
 

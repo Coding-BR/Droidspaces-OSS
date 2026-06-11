@@ -244,7 +244,7 @@ struct ds_net_handshake {
  *   Guarantees reply traffic to the container always resolves correctly.
  *
  * DS_RULE_PRIO_FROM_SUBNET - "from 172.28.0.0/16 lookup <gw_table>"
- *   Routes container-originated traffic through the active upstream table.
+ *   Routes container-originated traffic through the active uplink table.
  */
 #ifndef DS_RULE_PRIO_TO_SUBNET
 #define DS_RULE_PRIO_TO_SUBNET 6090
@@ -284,7 +284,6 @@ struct ds_tty_info {
  * ---------------------------------------------------------------------------*/
 
 #define DS_MAX_PORT_FORWARDS 32
-#define DS_MAX_UPSTREAM_IFACES 32
 
 struct ds_port_forward {
   uint16_t host_port;          /* port on the Android/Linux host  */
@@ -408,10 +407,6 @@ struct ds_config {
    * Once set in container.config, this IP is reused on every subsequent boot
    * instead of re-deriving a PID-hash IP.  Plain dotted-decimal, no CIDR. */
   char static_nat_ip[INET_ADDRSTRLEN];
-
-  /* Upstream interfaces for NAT routing (--upstream wlan0,rmnet0,...) */
-  char upstream_ifaces[DS_MAX_UPSTREAM_IFACES][IFNAMSIZ];
-  int upstream_iface_count;
 
   /* Resource limits (0 = unlimited) */
   long long memory_limit; /* bytes */
@@ -692,6 +687,9 @@ int ds_nl_add_route4(ds_nl_ctx_t *ctx, uint32_t dst_be, uint8_t dst_len,
                      uint32_t gw_be, int oif_idx);
 int ds_nl_move_to_netns(ds_nl_ctx_t *ctx, const char *ifname, int netns_fd);
 int ds_nl_get_iface_table(ds_nl_ctx_t *ctx, const char *ifname, int *table_out);
+int ds_nl_get_table_default_oif(ds_nl_ctx_t *ctx, int table, char *ifname_out);
+int ds_nl_get_android_default(ds_nl_ctx_t *ctx, char *ifname_out,
+                              int *table_out);
 int ds_nl_add_rule4(ds_nl_ctx_t *ctx, uint32_t src_be, uint8_t src_len,
                     uint32_t dst_be, uint8_t dst_len, int table, int priority);
 int ds_nl_del_rule4(ds_nl_ctx_t *ctx, uint32_t src_be, uint8_t src_len,

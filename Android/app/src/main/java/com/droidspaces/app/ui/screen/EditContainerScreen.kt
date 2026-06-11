@@ -52,7 +52,6 @@ import com.droidspaces.app.ui.component.PrivilegedModeDialog
 import com.droidspaces.app.ui.component.HardwareAccessDialog
 import com.droidspaces.app.ui.component.DsDropdown
 import androidx.compose.material.icons.filled.Public
-import com.droidspaces.app.ui.component.UpstreamInterfaceList
 import com.droidspaces.app.ui.component.PortForwardingList
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -106,7 +105,6 @@ fun EditContainerScreen(
     var dnsServers by remember { mutableStateOf(container.dnsServers) }
     var runAtBoot by remember { mutableStateOf(container.runAtBoot) }
     var envFileContent by remember { mutableStateOf(container.envFileContent ?: "") }
-    var upstreamInterfaces by remember { mutableStateOf(container.upstreamInterfaces) }
     var portForwards by remember { mutableStateOf(container.portForwards) }
     var forceCgroupv1 by remember { mutableStateOf(container.forceCgroupv1) }
     var blockNestedNs by remember { mutableStateOf(container.blockNestedNs) }
@@ -132,7 +130,6 @@ fun EditContainerScreen(
     var savedDnsServers by remember { mutableStateOf(container.dnsServers) }
     var savedRunAtBoot by remember { mutableStateOf(container.runAtBoot) }
     var savedEnvFileContent by remember { mutableStateOf(container.envFileContent ?: "") }
-    var savedUpstreamInterfaces by remember { mutableStateOf(container.upstreamInterfaces) }
     var savedPortForwards by remember { mutableStateOf(container.portForwards) }
     var savedForceCgroupv1 by remember { mutableStateOf(container.forceCgroupv1) }
     var savedBlockNestedNs by remember { mutableStateOf(container.blockNestedNs) }
@@ -170,7 +167,6 @@ fun EditContainerScreen(
             dnsServers != savedDnsServers ||
             runAtBoot != savedRunAtBoot ||
             envFileContent != savedEnvFileContent ||
-            upstreamInterfaces != savedUpstreamInterfaces ||
             portForwards != savedPortForwards ||
             forceCgroupv1 != savedForceCgroupv1 ||
             blockNestedNs != savedBlockNestedNs ||
@@ -214,7 +210,6 @@ fun EditContainerScreen(
                     dnsServers = dnsServers,
                     runAtBoot = runAtBoot,
                     envFileContent = if (envFileContent.isBlank()) null else envFileContent,
-                    upstreamInterfaces = upstreamInterfaces,
                     portForwards = portForwards,
                     forceCgroupv1 = forceCgroupv1,
                     blockNestedNs = blockNestedNs,
@@ -249,7 +244,6 @@ fun EditContainerScreen(
                         savedDnsServers = dnsServers
                         savedRunAtBoot = runAtBoot
                         savedEnvFileContent = envFileContent
-                        savedUpstreamInterfaces = upstreamInterfaces
                         savedPortForwards = portForwards
                         savedForceCgroupv1 = forceCgroupv1
                         savedBlockNestedNs = blockNestedNs
@@ -428,7 +422,7 @@ fun EditContainerScreen(
         },
         bottomBar = {
             val btnShape = RoundedCornerShape(20.dp)
-            val isReadyToSave = !isSaving && !isSaved && hasChanges && (netMode != "nat" || upstreamInterfaces.isNotEmpty()) && hostnameError == null
+            val isReadyToSave = !isSaving && !isSaved && hasChanges && hostnameError == null
             val targetBtnColor = when {
                 isSaved -> MaterialTheme.colorScheme.primaryContainer
                 isSaving || isReadyToSave -> MaterialTheme.colorScheme.primary
@@ -744,28 +738,6 @@ fun EditContainerScreen(
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
-
-                    // Upstream Interfaces
-                    val isUpstreamValid = upstreamInterfaces.isNotEmpty()
-                    Text(
-                        text = context.getString(R.string.upstream_interfaces_mandatory),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (!isUpstreamValid) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                    )
-
-                    if (!isUpstreamValid) {
-                        Text(
-                            text = context.getString(R.string.upstream_interfaces_required_error),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    UpstreamInterfaceList(
-                        upstreamInterfaces = upstreamInterfaces,
-                        onInterfacesChange = { upstreamInterfaces = it }
-                    )
 
                     // Port Forwards
                     Text(

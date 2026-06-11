@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.dp
 import com.droidspaces.app.ui.component.ToggleCard
 import com.droidspaces.app.ui.component.DsDropdown
 import androidx.compose.material.icons.filled.Public
-import com.droidspaces.app.ui.component.UpstreamInterfaceList
 import com.droidspaces.app.ui.component.PortForwardingList
 import androidx.compose.ui.platform.LocalContext
 import com.droidspaces.app.R
@@ -74,7 +73,6 @@ fun ContainerConfigScreen(
     initialBlockNestedNs: Boolean = false,
     initialPrivileged: String = "",
     initialEnvFileContent: String = "",
-    initialUpstreamInterfaces: List<String> = emptyList(),
     initialPortForwards: List<PortForward> = emptyList(),
     onNext: (
         netMode: String,
@@ -98,7 +96,6 @@ fun ContainerConfigScreen(
         blockNestedNs: Boolean,
         privileged: String,
         envFileContent: String?,
-        upstreamInterfaces: List<String>,
         portForwards: List<PortForward>
     ) -> Unit,
     onBack: () -> Unit
@@ -123,7 +120,6 @@ fun ContainerConfigScreen(
     var forceCgroupv1 by remember { mutableStateOf(initialForceCgroupv1) }
     var blockNestedNs by remember { mutableStateOf(initialBlockNestedNs) }
     var envFileContent by remember { mutableStateOf(initialEnvFileContent) }
-    var upstreamInterfaces by remember { mutableStateOf(initialUpstreamInterfaces) }
     var portForwards by remember { mutableStateOf(initialPortForwards) }
     var privileged by remember { mutableStateOf(initialPrivileged) }
     val context = LocalContext.current
@@ -277,7 +273,6 @@ fun ContainerConfigScreen(
         },
         bottomBar = {
             val btnShape = RoundedCornerShape(20.dp)
-            val isUpstreamValid = netMode != "nat" || upstreamInterfaces.isNotEmpty()
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -295,15 +290,14 @@ fun ContainerConfigScreen(
                             .navigationBarsPadding()
                             .clip(btnShape)
                             .clickable(
-                                enabled = isUpstreamValid,
                                 onClick = {
-                                    onNext(netMode, disableIPv6, enableAndroidStorage, enableHwAccess, enableGpuMode, enableTermuxX11, tx11ExtraFlags, enableVirgl, virglExtraFlags, enablePulseaudio, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, customInit, staticNatIp, forceCgroupv1, blockNestedNs, privileged, if (envFileContent.isBlank()) null else envFileContent, upstreamInterfaces, portForwards)
+                                    onNext(netMode, disableIPv6, enableAndroidStorage, enableHwAccess, enableGpuMode, enableTermuxX11, tx11ExtraFlags, enableVirgl, virglExtraFlags, enablePulseaudio, selinuxPermissive, volatileMode, bindMounts, dnsServers, runAtBoot, customInit, staticNatIp, forceCgroupv1, blockNestedNs, privileged, if (envFileContent.isBlank()) null else envFileContent, portForwards)
                                 },
                                 indication = androidx.compose.material.ripple.rememberRipple(bounded = true),
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                             ),
                         shape = btnShape,
-                        color = if (isUpstreamValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                        color = MaterialTheme.colorScheme.primary,
                         tonalElevation = 0.dp
                     ) {
                         Box(modifier = Modifier.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
@@ -312,13 +306,13 @@ fun ContainerConfigScreen(
                                     Icons.AutoMirrored.Filled.ArrowForward,
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp),
-                                    tint = if (isUpstreamValid) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    tint = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Text(
                                     context.getString(R.string.next_storage),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (isUpstreamValid) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                    color = MaterialTheme.colorScheme.onPrimary
                                 )
                             }
                         }
@@ -490,28 +484,6 @@ fun ContainerConfigScreen(
                             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
                         )
                     }
-
-                    // Upstream Interfaces
-                    val isUpstreamValid = upstreamInterfaces.isNotEmpty()
-                    Text(
-                        text = context.getString(R.string.upstream_interfaces_mandatory),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (!isUpstreamValid) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                    )
-
-                    if (!isUpstreamValid) {
-                        Text(
-                            text = context.getString(R.string.upstream_interfaces_required_error),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    UpstreamInterfaceList(
-                        upstreamInterfaces = upstreamInterfaces,
-                        onInterfacesChange = { upstreamInterfaces = it }
-                    )
 
                     // Port Forwards
                     Text(

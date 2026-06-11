@@ -221,12 +221,6 @@
     <string name="network_mode_nat_short">NAT</string>
     <string name="network_mode_none_short">None</string>
     <string name="nat_settings">NAT Settings</string>
-    <string name="upstream_interfaces_mandatory">Upstream Interfaces (Mandatory)</string>
-    <string name="upstream_interfaces_required_error">You must specify at least one upstream interface for NAT mode.</string>
-    <string name="add_upstream_interface">Add Upstream Interface</string>
-    <string name="available_system_interfaces">Available System Interfaces:</string>
-    <string name="enter_manually">Or enter it manually (wildcards are supported too):</string>
-    <string name="interface_name_hint">Interface Name (e.g. wlan0, v4-rmnet_data*)</string>
     <string name="port_forwarding">Port Forwarding</string>
     <string name="add_port_forward">Add Port Forward</string>
     <string name="host_port_hint">Host Port (1-65535 or range 100-200)</string>
