@@ -1504,6 +1504,27 @@ void ds_net_cleanup(struct ds_config *cfg, pid_t container_pid) {
       veth_host_name(effective_pid, veth_host, sizeof(veth_host));
       ds_nl_del_link(ctx, veth_host);
       ds_log("[NET] Gateway cleanup: removed %s", veth_host);
+
+      /* Refcount the delegated bridge: once the last client veth has left,
+       * tear down the gateway veth and the bridge so idle segments don't
+       * linger.  The gateway's LAN interface is re-plugged lazily the next
+       * time any client attaches to this segment (setup_gateway_veth_side). */
+      char bridge[IFNAMSIZ], gw_host[IFNAMSIZ], gw_peer[IFNAMSIZ];
+      gateway_bridge_name(cfg, bridge, sizeof(bridge));
+      gateway_veth_names(cfg, gw_host, sizeof(gw_host), gw_peer,
+                         sizeof(gw_peer));
+      int clients = ds_nl_count_bridge_members_with_prefix(ctx, bridge, "ds-v");
+      if (clients > 0) {
+        ds_log("[NET] Gateway cleanup: %d client(s) still on %s - keeping "
+               "delegated LAN",
+               clients, bridge);
+      } else {
+        ds_nl_del_link(ctx, gw_host);
+        ds_nl_del_link(ctx, bridge);
+        ds_log("[NET] Gateway cleanup: torn down idle delegated LAN %s "
+               "(removed %s)",
+               bridge, gw_host);
+      }
     } else {
       ds_warn("[NET] Gateway cleanup: cannot derive veth name - no valid PID");
     }
