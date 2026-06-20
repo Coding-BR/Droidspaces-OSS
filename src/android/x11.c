@@ -71,10 +71,44 @@ static void start_termux_x11_activity(void) {
   waitpid(child, NULL, 0);
 }
 
-static int x11_socket_accepts_connections(void) {
+enum x11_socket_state {
+  X11_SOCKET_READY,
+  X11_SOCKET_MISSING,
+  X11_SOCKET_REFUSED,
+  X11_SOCKET_DENIED,
+  X11_SOCKET_UNKNOWN,
+};
+
+struct x11_backend_strategy {
+  const char *name;
+  void (*prepare)(int uid);
+  void (*wake_activity)(void);
+  enum x11_socket_state (*probe)(void);
+};
+
+static const char *x11_socket_state_name(enum x11_socket_state state) {
+  switch (state) {
+  case X11_SOCKET_READY:
+    return "ready";
+  case X11_SOCKET_MISSING:
+    return "missing";
+  case X11_SOCKET_REFUSED:
+    return "refused";
+  case X11_SOCKET_DENIED:
+    return "denied";
+  default:
+    return "unknown";
+  }
+}
+
+static int x11_socket_state_is_recoverable(enum x11_socket_state state) {
+  return state == X11_SOCKET_MISSING || state == X11_SOCKET_REFUSED;
+}
+
+static enum x11_socket_state probe_termux_x11_socket(void) {
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd < 0)
-    return 0;
+    return X11_SOCKET_UNKNOWN;
 
   struct sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
@@ -82,15 +116,43 @@ static int x11_socket_accepts_connections(void) {
   safe_strncpy(addr.sun_path, TX11_SOCK_DIR "/" TX11_DISPLAY_SOCK,
                sizeof(addr.sun_path));
 
-  int ok = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+    close(fd);
+    return X11_SOCKET_READY;
+  }
+
+  int err = errno;
   close(fd);
-  return ok;
+
+  switch (err) {
+  case ENOENT:
+  case ENOTDIR:
+    return X11_SOCKET_MISSING;
+  case ECONNREFUSED:
+  case ECONNRESET:
+    return X11_SOCKET_REFUSED;
+  case EACCES:
+  case EPERM:
+    return X11_SOCKET_DENIED;
+  default:
+    return X11_SOCKET_UNKNOWN;
+  }
 }
 
-static void restart_stale_xserver(pid_t pid) {
-  ds_warn("Termux:X11: cached server PID %d is not accepting X11 "
-          "connections; restarting",
-          (int)pid);
+static const struct x11_backend_strategy termux_x11_strategy = {
+    .name = "Termux:X11",
+    .prepare = prepare_x11_socket_dirs,
+    .wake_activity = start_termux_x11_activity,
+    .probe = probe_termux_x11_socket,
+};
+
+static int preserve_existing_xserver(enum x11_socket_state state) {
+  return state == X11_SOCKET_DENIED || state == X11_SOCKET_UNKNOWN;
+}
+
+static void restart_stale_xserver(pid_t pid, enum x11_socket_state state) {
+  ds_warn("Termux:X11: cached server PID %d has socket state '%s'; restarting",
+          (int)pid, x11_socket_state_name(state));
   kill(pid, SIGTERM);
   for (int i = 0; i < 10 && kill(pid, 0) == 0; i++)
     usleep(100000);
@@ -261,23 +323,35 @@ int ds_x11_daemon_start(struct ds_config *cfg) {
     return -1;
   }
 
+  const struct x11_backend_strategy *strategy = &termux_x11_strategy;
+
   /* Reuse existing global server if still alive */
   pid_t existing = ds_daemon_read_pid("x11.xpid");
   if (existing > 0) {
-    if (x11_socket_accepts_connections()) {
-      ds_log("Termux:X11: xserver already running (PID %d)", (int)existing);
+    enum x11_socket_state state = strategy->probe();
+    if (state == X11_SOCKET_READY) {
+      ds_log("%s: xserver already running (PID %d)", strategy->name,
+             (int)existing);
       cfg->x11_pid = existing;
       return 1;
     }
-    restart_stale_xserver(existing);
+    if (x11_socket_state_is_recoverable(state)) {
+      restart_stale_xserver(existing, state);
+    } else if (preserve_existing_xserver(state)) {
+      ds_warn("%s: socket probe state is '%s'; preserving cached PID %d for "
+              "device compatibility",
+              strategy->name, x11_socket_state_name(state), (int)existing);
+      cfg->x11_pid = existing;
+      return 1;
+    }
   }
 
   int uid = resolve_termux_uid();
   if (uid < 0)
     return -1;
 
-  prepare_x11_socket_dirs(uid);
-  start_termux_x11_activity();
+  strategy->prepare(uid);
+  strategy->wake_activity();
 
   ds_log("[X11] launching Termux-X11 server (uid=%d)", uid);
   pid_t child = spawn_xserver(uid, TX11_DISPLAY_STR, cfg->tx11_extra_flags);
