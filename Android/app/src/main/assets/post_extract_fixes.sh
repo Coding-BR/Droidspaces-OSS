@@ -46,22 +46,6 @@ if $TEST ! -d "$ROOTFS_PATH"; then
     exit 1
 fi
 
-log "Starting post-extraction fixes for: $ROOTFS_PATH"
-
-# Check if fixes were already applied
-if $TEST -f "$ROOTFS_PATH/etc/droidspaces"; then
-    log "Post-extraction fixes already applied, skipping..."
-    exit 0
-fi
-
-# Detect NixOS
-if $TEST -d "$ROOTFS_PATH/nix"; then
-    log "NixOS detected, skipping all post-extraction fixes (Nix manages its own state)"
-    # Mark as applied anyway to prevent re-running
-    $TOUCH "$ROOTFS_PATH/etc/droidspaces" 2>/dev/null || true
-    exit 0
-fi
-
 # Helper to execute a command inside the chroot environment
 run_in_chroot() {
     local command="$*"
@@ -71,6 +55,28 @@ run_in_chroot() {
     # Note: This assumes /bin/sh exists in the rootfs
     $CHROOT "$ROOTFS_PATH" /bin/sh -c "$common_exports $command"
 }
+
+log "Starting post-extraction fixes for: $ROOTFS_PATH"
+
+# Detect NixOS
+if $TEST -d "$ROOTFS_PATH/nix"; then
+    log "NixOS detected, skipping all post-extraction fixes (Nix manages its own state)"
+    # Mark as applied anyway to prevent re-running
+    $TOUCH "$ROOTFS_PATH/etc/droidspaces" 2>/dev/null || true
+    exit 0
+fi
+
+# Pre-commit machine-id to prevent first-boot deadlock in Fedora 44
+log "Generating machine-id..."
+$CAT /proc/sys/kernel/random/uuid | $BB tr -d '-' | $BB tr -d '\n' > "$ROOTFS_PATH/etc/machine-id"
+$ECHO "" >> "$ROOTFS_PATH/etc/machine-id"
+$CHMOD 444 "$ROOTFS_PATH/etc/machine-id"
+
+# Check if fixes were already applied
+if $TEST -f "$ROOTFS_PATH/etc/droidspaces"; then
+    log "Post-extraction fixes already applied, skipping..."
+    exit 0
+fi
 
 # --- 1. General Fixes (Init-independent) ---
 
@@ -104,12 +110,6 @@ if $TEST -f "$ROOTFS_PATH/usr/bin/systemctl" || $TEST -f "$ROOTFS_PATH/bin/syste
     $TEST -d "$ROOTFS_PATH/usr/lib/systemd/system" && GUEST_SYSTEMD_PATH="/usr/lib/systemd/system"
 
     log "Systemd detected (at $GUEST_SYSTEMD_PATH), applying fixes..."
-
-    # 00. Pre-commit machine-id to prevent first-boot deadlock in Fedora 44
-    log "Generating machine-id..."
-    $CAT /proc/sys/kernel/random/uuid | $BB tr -d '-' | $BB tr -d '\n' > "$ROOTFS_PATH/etc/machine-id"
-    $ECHO "" >> "$ROOTFS_PATH/etc/machine-id"
-    $CHMOD 444 "$ROOTFS_PATH/etc/machine-id"
 
     # 01. Mask problematic services for Android kernels
     log "Masking problematic systemd services..."
@@ -184,16 +184,18 @@ EOF
         $PRINTF "[Unit]\nConditionPathIsReadWrite=\n" > "$ROOTFS_PATH/etc/systemd/system/${unit}.d/99-readonly-fix.conf"
     done
 
-    # 06. Limit specific network services to only start in NAT mode
-    # Prevents cellular network breakage when running in host network mode
-    log "Applying NAT mode guards to network services..."
+    # 06. Limit specific network services to NAT and gateway modes only
+    # Both need an in-container DHCP client (NAT: lease from Droidspaces; gateway:
+    # lease from the gateway container, e.g. OpenWRT). Host/none modes still skip
+    # them to prevent cellular network breakage.
+    log "Applying NAT/gateway mode guards to network services..."
     for unit in NetworkManager.service dhcpcd.service systemd-resolved.service systemd-networkd.service; do
         if $TEST -f "$ROOTFS_PATH/$GUEST_SYSTEMD_PATH/$unit" || $TEST -f "$ROOTFS_PATH/etc/systemd/system/multi-user.target.wants/$unit"; then
             $MKDIR -p "$ROOTFS_PATH/etc/systemd/system/${unit}.d"
             $CAT > "$ROOTFS_PATH/etc/systemd/system/${unit}.d/99-netmode-limit.conf" << 'EOF'
 [Service]
 ExecCondition=
-ExecCondition=/bin/sh -c "grep -q 'net_mode=nat' /run/droidspaces/container.config"
+ExecCondition=/bin/sh -c "grep -qE 'net_mode=(nat|gateway)' /run/droidspaces/container.config"
 EOF
         fi
     done
@@ -221,12 +223,13 @@ fi
 
 # --- 3. Alpine/OpenRC & dhcpcd-Specific Fixes ---
 
-# Replace dhcpcd init script to only start in NAT network mode
+# Replace dhcpcd init script to only start in NAT or gateway network mode
 # This is the OpenRC equivalent of systemd's ExecCondition - if the container
 # is running in host network mode, dhcpcd is cleanly skipped at boot to prevent
-# cellular network breakage and kernel panics on Android interfaces.
+# cellular network breakage and kernel panics on Android interfaces. Gateway
+# mode needs it too: the DHCP lease comes from the gateway container.
 if $TEST -f "$ROOTFS_PATH/etc/init.d/dhcpcd"; then
-    log "Alpine/OpenRC dhcpcd service detected, applying NAT mode limitation..."
+    log "Alpine/OpenRC dhcpcd service detected, applying NAT/gateway mode limitation..."
     $CAT > "$ROOTFS_PATH/etc/init.d/dhcpcd" << 'INITEOF'
 #!/sbin/openrc-run
 
@@ -246,9 +249,9 @@ depend() {
 }
 
 start_pre() {
-	# Only start in NAT mode - prevents cellular network breakage in host network mode
-	if ! grep -q 'net_mode=nat' /run/droidspaces/container.config 2>/dev/null; then
-		einfo "Skipping dhcpcd: not in NAT network mode"
+	# Only start in NAT or gateway mode - prevents cellular network breakage in host network mode
+	if ! grep -qE 'net_mode=(nat|gateway)' /run/droidspaces/container.config 2>/dev/null; then
+		einfo "Skipping dhcpcd: not in NAT or gateway network mode"
 		return 1
 	fi
 	checkpath -d /run/dhcpcd

@@ -18,9 +18,9 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || ech
 # Verbose control - V=1 shows full commands, V=0 (default) shows kernel-style short logs
 V ?= 0
 
-# Optional private control bridge for the external C++ droidspaces-socketd.
-# Keep this off by default so the stock static Droidspaces binary stays unchanged.
-ENABLE_SOCKETD_BACKEND ?= 0
+# Optional private control bridge used by API-capable WebUI daemons.
+# Enabled by default for WebUI-ready builds; set to 0 for minimal CLI-only builds.
+ENABLE_SOCKETD_BACKEND ?= 1
 
 ifeq ($(V),1)
   Q       =
@@ -100,7 +100,7 @@ find-cc = $(shell \
 		echo ""; \
 	fi)
 
-.PHONY: all help clean native x86_64 aarch64 armhf x86 riscv64 all-build tarball all-tarball debug-hardened
+.PHONY: all help clean native x86_64 aarch64 armhf x86 riscv64 all-build tarball all-tarball debug-hardened format
 
 all: help
 
@@ -122,12 +122,13 @@ help:
 	@echo ""
 	@echo "Options:"
 	@echo "  V=1            - Show full compiler commands"
-	@echo "  ENABLE_SOCKETD_BACKEND=1"
-	@echo "                 - Compile the private droidspaces-socketd backend bridge"
+	@echo "  ENABLE_SOCKETD_BACKEND=0"
+	@echo "                 - Disable the private API backend bridge for minimal builds"
 	@echo ""
 	@echo "Other:"
 	@echo "  make clean     - Remove build artifacts"
 	@echo "  make debug-hardened - Build with ASan/UBSan/LSan to find bugs"
+	@echo "  make format    - Run clang-format on all .c/.h/.cpp files"
 
 $(OUT_DIR):
 	$(Q)mkdir -p $(OUT_DIR)
@@ -274,6 +275,11 @@ all-tarball: all-build
 	rm -rf $$TEMP_DIR; \
 	$(MAKE) --no-print-directory sync-android; \
 	echo "[+] Created: $$TARBALL ($$(du -h $$TARBALL | cut -f1))"
+
+format:
+	@command -v clang-format >/dev/null 2>&1 || { echo "Error: clang-format not found"; exit 1; }
+	@find $(SRC_DIR) -name '*.c' -o -name '*.h' -o -name '*.cpp' | xargs clang-format -i
+	@echo "[+] Formatted all source files"
 
 clean:
 	@rm -rf $(OUT_DIR) $(BINARY_NAME)-*.tar.gz
