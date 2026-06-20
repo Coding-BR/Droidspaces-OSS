@@ -1052,6 +1052,7 @@ static int loop_attach_one(long devnr, int img_fd, const char *img_path,
   }
 
 set_status:
+  ;
 
   struct loop_info64 li;
   memset(&li, 0, sizeof(li));
