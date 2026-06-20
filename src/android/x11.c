@@ -13,6 +13,8 @@
 #include "droidspace.h"
 #include <fcntl.h>
 #include <grp.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 
 /* ---- helpers ---------------------------------------------------------- */
@@ -36,6 +38,35 @@ static int resolve_termux_uid(void) {
     return -1;
   }
   return uid;
+}
+
+static int x11_socket_accepts_connections(void) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0)
+    return 0;
+
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  safe_strncpy(addr.sun_path, TX11_SOCK_DIR "/" TX11_DISPLAY_SOCK,
+               sizeof(addr.sun_path));
+
+  int ok = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+  close(fd);
+  return ok;
+}
+
+static void restart_stale_xserver(pid_t pid) {
+  ds_warn("Termux:X11: cached server PID %d is not accepting X11 "
+          "connections; restarting",
+          (int)pid);
+  kill(pid, SIGTERM);
+  for (int i = 0; i < 10 && kill(pid, 0) == 0; i++)
+    usleep(100000);
+  if (kill(pid, 0) == 0)
+    kill(pid, SIGKILL);
+  ds_daemon_remove_pid("x11.xpid");
+  unlink(TX11_SOCK_DIR "/" TX11_DISPLAY_SOCK);
 }
 
 /* ---- xserver child ---------------------------------------------------- */
@@ -205,9 +236,12 @@ int ds_x11_daemon_start(struct ds_config *cfg) {
   /* Reuse existing global server if still alive */
   pid_t existing = ds_daemon_read_pid("x11.xpid");
   if (existing > 0) {
-    ds_log("Termux:X11: xserver already running (PID %d)", (int)existing);
-    cfg->x11_pid = existing;
-    return 1;
+    if (x11_socket_accepts_connections()) {
+      ds_log("Termux:X11: xserver already running (PID %d)", (int)existing);
+      cfg->x11_pid = existing;
+      return 1;
+    }
+    restart_stale_xserver(existing);
   }
 
   int uid = resolve_termux_uid();
