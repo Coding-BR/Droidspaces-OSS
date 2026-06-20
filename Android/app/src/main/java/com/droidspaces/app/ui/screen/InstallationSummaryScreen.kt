@@ -196,10 +196,6 @@ fun InstallationSummaryScreen(
                         }
                     }
 
-                    if (config.upstreamInterfaces.isNotEmpty()) {
-                        SummaryItem(stringResource(R.string.upstream_interfaces_mandatory), config.upstreamInterfaces.joinToString(", "), Icons.Default.Public)
-                    }
-
                     if (config.portForwards.isNotEmpty()) {
                         config.portForwards.forEach { forward ->
                             SummaryItem(stringResource(R.string.port_forwarding), "${forward.hostPort} → ${forward.containerPort ?: forward.hostPort} (${forward.proto})", Icons.AutoMirrored.Filled.ArrowForward)
@@ -213,7 +209,7 @@ fun InstallationSummaryScreen(
                         !config.enableTermuxX11 && !config.enableVirgl && !config.enablePulseaudio &&
                         !config.enableWayland &&
                         !config.forceCgroupv1 && !config.blockNestedNs &&
-                        config.upstreamInterfaces.isEmpty() && config.portForwards.isEmpty() &&
+                        config.portForwards.isEmpty() &&
                         config.envFileContent.isNullOrBlank()) {
                         Text(
                             text = stringResource(R.string.no_options_enabled),

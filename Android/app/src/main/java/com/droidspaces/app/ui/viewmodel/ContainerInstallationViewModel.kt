@@ -78,6 +78,18 @@ class ContainerInstallationViewModel : ViewModel() {
     var staticNatIp: String by mutableStateOf("")
         private set
 
+    var gatewayContainer: String by mutableStateOf("")
+        private set
+
+    var gatewayNet: String by mutableStateOf("")
+        private set
+
+    var gatewayIface: String by mutableStateOf("")
+        private set
+
+    var gatewayBridge: String by mutableStateOf("")
+        private set
+
     var envFileContent: String? by mutableStateOf(null)
         private set
 
@@ -85,9 +97,6 @@ class ContainerInstallationViewModel : ViewModel() {
         private set
 
     var sparseImageSizeGB: Int by mutableStateOf(8)
-        private set
-
-    var upstreamInterfaces: List<String> by mutableStateOf(emptyList())
         private set
 
     var portForwards: List<PortForward> by mutableStateOf(emptyList())
@@ -136,11 +145,14 @@ class ContainerInstallationViewModel : ViewModel() {
         customInit: String,
         staticNatIp: String,
         envFileContent: String?,
-        upstreamInterfaces: List<String>,
         portForwards: List<PortForward>,
         forceCgroupv1: Boolean,
         blockNestedNs: Boolean,
-        privileged: String
+        privileged: String,
+        gatewayContainer: String,
+        gatewayNet: String,
+        gatewayIface: String,
+        gatewayBridge: String
     ) {
         this.netMode = netMode
         this.disableIPv6 = disableIPv6
@@ -161,11 +173,14 @@ class ContainerInstallationViewModel : ViewModel() {
         this.customInit = customInit
         this.staticNatIp = staticNatIp
         this.envFileContent = envFileContent
-        this.upstreamInterfaces = upstreamInterfaces
         this.portForwards = portForwards
         this.forceCgroupv1 = forceCgroupv1
         this.blockNestedNs = blockNestedNs
         this.privileged = privileged
+        this.gatewayContainer = gatewayContainer
+        this.gatewayNet = gatewayNet
+        this.gatewayIface = gatewayIface
+        this.gatewayBridge = gatewayBridge
     }
 
     fun buildConfig(): ContainerInfo? {
@@ -198,11 +213,14 @@ class ContainerInstallationViewModel : ViewModel() {
             runAtBoot = runAtBoot,
             customInit = customInit,
             staticNatIp = staticNatIp,
+            gatewayContainer = gatewayContainer,
+            gatewayNet = gatewayNet,
+            gatewayIface = gatewayIface,
+            gatewayBridge = gatewayBridge,
             envFileContent = envFileContent,
             status = ContainerStatus.STOPPED, // Default status for new container
             useSparseImage = useSparseImage,
             sparseImageSizeGB = if (useSparseImage) sparseImageSizeGB else null,
-            upstreamInterfaces = upstreamInterfaces,
             portForwards = portForwards,
             forceCgroupv1 = forceCgroupv1,
             blockNestedNs = blockNestedNs,
@@ -232,10 +250,13 @@ class ContainerInstallationViewModel : ViewModel() {
         runAtBoot = false
         customInit = ""
         staticNatIp = ""
+        gatewayContainer = ""
+        gatewayNet = ""
+        gatewayIface = ""
+        gatewayBridge = ""
         envFileContent = null
         useSparseImage = true
         sparseImageSizeGB = 8
-        upstreamInterfaces = emptyList()
         portForwards = emptyList()
         forceCgroupv1 = false
         blockNestedNs = false

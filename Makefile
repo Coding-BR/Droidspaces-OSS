@@ -61,7 +61,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/android/virgl.c \
        $(SRC_DIR)/android/pulseaudio.c \
        $(SRC_DIR)/android/wayland.c \
-       $(SRC_DIR)/virtualize.c
+       $(SRC_DIR)/virtualize.c \
+       $(SRC_DIR)/create_img.c
 
 # Compiler flags - hardened warning set, all warnings are errors
 CFLAGS  = -Wall -Wextra -Wpedantic -Werror -O2 -flto=auto -std=gnu99 -I$(SRC_DIR)/include -no-pie -pthread
@@ -101,7 +102,7 @@ find-cc = $(shell \
 		echo ""; \
 	fi)
 
-.PHONY: all help clean native x86_64 aarch64 armhf x86 riscv64 all-build tarball all-tarball debug-hardened wayland-libs
+.PHONY: all help clean native x86_64 aarch64 armhf x86 riscv64 all-build tarball all-tarball debug-hardened format wayland-libs
 
 all: help
 
@@ -129,6 +130,7 @@ help:
 	@echo "Other:"
 	@echo "  make clean          - Remove build artifacts"
 	@echo "  make debug-hardened - Build with ASan/UBSan/LSan to find bugs"
+	@echo "  make format    - Run clang-format on all .c/.h/.cpp files"
 	@echo "  make wayland-libs   - Build Wayland prebuilt .so files for Android"
 
 $(OUT_DIR):
@@ -276,6 +278,11 @@ all-tarball: all-build
 	rm -rf $$TEMP_DIR; \
 	$(MAKE) --no-print-directory sync-android; \
 	echo "[+] Created: $$TARBALL ($$(du -h $$TARBALL | cut -f1))"
+
+format:
+	@command -v clang-format >/dev/null 2>&1 || { echo "Error: clang-format not found"; exit 1; }
+	@find $(SRC_DIR) -name '*.c' -o -name '*.h' -o -name '*.cpp' | xargs clang-format -i
+	@echo "[+] Formatted all source files"
 
 clean:
 	@rm -rf $(OUT_DIR) $(BINARY_NAME)-*.tar.gz
