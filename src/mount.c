@@ -1033,6 +1033,7 @@ static int open_loop_dev(long devnr, char *path_out, size_t path_size) {
 
 static int loop_attach_one(long devnr, int img_fd, const char *img_path,
                            char *loop_path_out, size_t path_size) {
+  struct loop_info64 li;
   int loop_fd = open_loop_dev(devnr, loop_path_out, path_size);
   if (loop_fd < 0) {
     ds_warn("Failed to open loop%ld: %s", devnr, strerror(errno));
@@ -1053,7 +1054,6 @@ static int loop_attach_one(long devnr, int img_fd, const char *img_path,
 
 set_status:
 
-  struct loop_info64 li;
   memset(&li, 0, sizeof(li));
   li.lo_flags = LO_FLAGS_AUTOCLEAR;
   snprintf((char *)li.lo_file_name, LO_NAME_SIZE, "%.63s", img_path);
