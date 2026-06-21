@@ -23,6 +23,23 @@
  * Resolve Termux UID and verify that termux-x11 is installed.
  * Returns the UID on success, -1 on failure.
  */
+static int termux_path_exists_as_uid(int uid, const char *path) {
+  pid_t child = fork();
+  if (child < 0)
+    return access(path, F_OK) == 0;
+
+  if (child == 0) {
+    if (ds_drop_privileges(uid) < 0)
+      _exit(1);
+    _exit(access(path, F_OK) == 0 ? 0 : 1);
+  }
+
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0)
+    return 0;
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 static int resolve_termux_uid(void) {
   int uid = ds_resolve_termux_uid();
   if (uid < 0)
@@ -32,15 +49,51 @@ static int resolve_termux_uid(void) {
     ds_warn("Termux:X11: termux or termux-x11 package missing");
     return -1;
   }
-  if (access(TX11_LOADER, F_OK) != 0) {
+  if (!termux_path_exists_as_uid(uid, TX11_LOADER)) {
     ds_warn(
         "Termux:X11: loader.apk not found. Is termux-x11 package installed?");
+    return -1;
+  }
+  if (!termux_path_exists_as_uid(uid, TX11_PREFIX "/share/X11/xkb")) {
+    ds_warn("Termux:X11: XKB data not found. Install xkeyboard-config inside "
+            "Termux");
     return -1;
   }
   return uid;
 }
 
-static void prepare_x11_socket_dirs(int uid) {
+static int prepare_x11_socket_dirs_as_uid(int uid) {
+  pid_t child = fork();
+  if (child < 0)
+    return -1;
+
+  if (child == 0) {
+    if (ds_drop_privileges(uid) < 0)
+      _exit(1);
+
+    int ok = 1;
+    if (mkdir_p(TX11_PREFIX "/tmp", 01777) < 0)
+      ok = 0;
+    if (chmod(TX11_PREFIX "/tmp", 01777) < 0)
+      ok = 0;
+    if (mkdir_p(TX11_SOCK_DIR, 01777) < 0)
+      ok = 0;
+    if (chmod(TX11_SOCK_DIR, 01777) < 0)
+      ok = 0;
+
+    _exit(ok ? 0 : 1);
+  }
+
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0)
+    return -1;
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+
+static int prepare_x11_socket_dirs(int uid) {
+  if (prepare_x11_socket_dirs_as_uid(uid) == 0)
+    return 0;
+
   mkdir_p(TX11_PREFIX "/tmp", 01777);
   chmod(TX11_PREFIX "/tmp", 01777);
 
@@ -49,6 +102,8 @@ static void prepare_x11_socket_dirs(int uid) {
     /* ignore */
   }
   chmod(TX11_SOCK_DIR, 01777);
+
+  return access(TX11_SOCK_DIR, F_OK) == 0 ? 0 : -1;
 }
 
 static void start_termux_x11_activity(void) {
@@ -81,7 +136,7 @@ enum x11_socket_state {
 
 struct x11_backend_strategy {
   const char *name;
-  void (*prepare)(int uid);
+  int (*prepare)(int uid);
   void (*wake_activity)(void);
   enum x11_socket_state (*probe)(void);
 };
@@ -224,8 +279,14 @@ static void xserver_child_wrapper(int ready_fd, void *user_data) {
   setenv("XKB_CONFIG_ROOT", TX11_PREFIX "/share/X11/xkb", 1);
   setenv("HOME", TX11_HOME, 1);
 
-  /* Socket dir -- created as root before we drop privs */
-  prepare_x11_socket_dirs(args->uid);
+  /* Socket dir -- prefer creating it as Termux's UID to satisfy Android app
+   * data directory ownership rules on stricter ROMs. */
+  if (prepare_x11_socket_dirs(args->uid) < 0) {
+    fprintf(stderr, "[X11] cannot prepare Termux:X11 socket directory\n");
+    if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
+    }
+    _exit(1);
+  }
 
   /* Drop privileges */
   if (ds_drop_privileges(args->uid) < 0) {
@@ -350,7 +411,11 @@ int ds_x11_daemon_start(struct ds_config *cfg) {
   if (uid < 0)
     return -1;
 
-  strategy->prepare(uid);
+  if (strategy->prepare(uid) < 0) {
+    ds_warn("Termux:X11: failed to prepare socket directory %s",
+            TX11_SOCK_DIR);
+    return -1;
+  }
   strategy->wake_activity();
 
   ds_log("[X11] launching Termux-X11 server (uid=%d)", uid);

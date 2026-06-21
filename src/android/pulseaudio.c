@@ -28,13 +28,53 @@ static int pa_resolve_termux_uid(void) {
   if (uid < 0)
     return -1;
 
-  if (access(TX11_PULSE_BIN, F_OK) != 0) {
+  pid_t child = fork();
+  if (child < 0)
+    return -1;
+  if (child == 0) {
+    if (ds_drop_privileges(uid) < 0)
+      _exit(1);
+    _exit(access(TX11_PULSE_BIN, F_OK) == 0 ? 0 : 1);
+  }
+
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0 ||
+      !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
     ds_warn("PulseAudio: binary not found at %s. Is pulseaudio installed in "
             "Termux?",
             TX11_PULSE_BIN);
     return -1;
   }
   return uid;
+}
+
+static int pa_prepare_termux_tmp(int uid) {
+  pid_t child = fork();
+  if (child < 0)
+    return -1;
+
+  if (child == 0) {
+    if (ds_drop_privileges(uid) < 0)
+      _exit(1);
+    if (mkdir_p(TX11_PREFIX "/tmp", 01777) < 0)
+      _exit(1);
+    if (chmod(TX11_PREFIX "/tmp", 01777) < 0)
+      _exit(1);
+    _exit(0);
+  }
+
+  int status = 0;
+  if (waitpid(child, &status, 0) < 0)
+    return -1;
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+    return 0;
+
+  int ok = 1;
+  if (mkdir_p(TX11_PREFIX "/tmp", 01777) < 0)
+    ok = 0;
+  if (chmod(TX11_PREFIX "/tmp", 01777) < 0)
+    ok = 0;
+  return ok ? 0 : -1;
 }
 
 /*
@@ -103,8 +143,13 @@ static void pulse_child_wrapper(int ready_fd, void *user_data) {
   setenv("PREFIX", TX11_PREFIX, 1);
   setenv("PULSE_SERVER", "unix:" TX11_PULSE_SOCKET, 1);
 
-  /* Ensure the tmp directory exists (root creates it before priv drop) */
-  mkdir_p(TX11_PREFIX "/tmp", 0755);
+  /* Ensure tmp is usable by Termux-side daemons and sockets. */
+  if (pa_prepare_termux_tmp(args->uid) < 0) {
+    perror("[PulseAudio] tmp setup failed");
+    if (write(ready_fd, "\x01", 1) < 0) { /* ignore */
+    }
+    _exit(1);
+  }
 
   /* Stay in droidspacesd (permissive) -- no domain transition needed.
    * untrusted_app_27 blocks execv of Termux binaries under enforcing. */
