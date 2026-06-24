@@ -5,7 +5,6 @@ set "DROIDSPACES=/data/local/Droidspaces/bin/droidspaces"
 set "CONTAINER=ubuntu"
 set "CONFIG=/data/local/Droidspaces/Containers/%CONTAINER%/container.config"
 set "ENVFILE=/data/local/Droidspaces/Containers/%CONTAINER%/anland.env"
-set "ANLAND_SOCKET_HOST=/data/local/tmp/display_daemon.sock"
 set "TMP_SH=/data/local/tmp/fix-anland-display.sh"
 
 where adb >nul 2>&1
@@ -21,11 +20,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/5] Verificando root e Anland...
-adb shell "su -c 'id >/dev/null && test -x %DROIDSPACES% && test -S %ANLAND_SOCKET_HOST%'"
+echo [1/5] Verificando root e Droidspaces...
+adb shell "su -c 'id >/dev/null && test -x %DROIDSPACES% && test -f %CONFIG%'"
 if errorlevel 1 (
-  echo [ERRO] Root, Droidspaces ou socket do Anland nao esta pronto.
-  echo        Abra o app Anland e confirme que /data/local/tmp/display_daemon.sock existe.
+  echo [ERRO] Root, Droidspaces ou config do container nao esta pronto.
   exit /b 1
 )
 
@@ -43,7 +41,7 @@ if errorlevel 1 (
 )
 
 echo [3/5] Aplicando correcao Anland...
-adb shell "su -c 'chmod 755 %TMP_SH% && %TMP_SH%'"
+adb shell "su -c 'chmod 755 %TMP_SH% && ANLAND_FORCE_REINSTALL=1 %TMP_SH%'"
 if errorlevel 1 (
   echo [ERRO] Falha ao aplicar correcao.
   exit /b 1
