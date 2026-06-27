@@ -1,4 +1,6 @@
 *.sh text eol=lf
+*.rule text eol=lf
+Android/app/src/main/assets/boot-module/** text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 *.c text eol=lf

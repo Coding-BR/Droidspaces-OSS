@@ -45,6 +45,10 @@ log "Droidspaces post-fs-data script started"
 # Daemon mode marker file
 DAEMON_MODE_FILE=${DROIDSPACE_DIR}/.daemon_mode
 
+get_daemon_pid() {
+    pgrep -f "droidspaces daemon" 2>/dev/null | head -1
+}
+
 # Check if the /vendor partition already has droidspaces binary intergrated
 if [ -f /vendor/bin/droidspaces ] || [ -L /vendor/bin/droidspaces ]; then
     log "Droidspaces binary already integrated in /vendor partition, skipping..."
@@ -55,6 +59,12 @@ fi
 # Start the Droidspaces daemon if enabled (value 1)
 if [ -f "${DAEMON_MODE_FILE}" ] && [ "$(${BUSYBOX_BINARY} cat "${DAEMON_MODE_FILE}" 2>/dev/null)" = "1" ]; then
     log "Daemon mode enabled, starting Droidspaces daemon..."
+
+    PID=$(get_daemon_pid)
+    if [ -n "${PID}" ]; then
+        log "Daemon already running (PID ${PID})"
+        exit 0
+    fi
 
     # Relabel the binary to droidspacesd_exec so the kernel's SELinux entrypoint
     # check passes when droidspaces re-execs itself into u:r:droidspacesd:s0.
@@ -67,7 +77,12 @@ if [ -f "${DAEMON_MODE_FILE}" ] && [ "$(${BUSYBOX_BINARY} cat "${DAEMON_MODE_FIL
     if "${DROIDSPACE_BINARY}" daemon 2>&1; then
         log "Daemon process launched successfully"
     else
-        log "WARNING: Failed to launch daemon"
+        PID=$(get_daemon_pid)
+        if [ -n "${PID}" ]; then
+            log "Daemon is running (PID ${PID})"
+        else
+            log "WARNING: Failed to launch daemon"
+        fi
     fi
 else
     log "Daemon mode disabled or not configured, skipping daemon start"
