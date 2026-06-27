@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.FileNotFoundException
 
 sealed class InstallationStep {
     data class DetectingArchitecture(val arch: String) : InstallationStep()
@@ -80,6 +81,24 @@ object BinaryInstaller {
 
             val droidspacesBinaryName = getDroidspacesBinaryName()
             val busyboxBinaryName = getBusyboxBinaryName()
+            val requiredAssets = listOf(droidspacesBinaryName, busyboxBinaryName)
+            val missingAssets = requiredAssets.filter { assetName ->
+                try {
+                    context.assets.open("binaries/$assetName").close()
+                    false
+                } catch (_: FileNotFoundException) {
+                    true
+                }
+            }
+            if (missingAssets.isNotEmpty()) {
+                return@withContext Result.failure(
+                    Exception(
+                        "APK is missing required asset(s): ${
+                            missingAssets.joinToString()
+                        }. Rebuild after running make all-build/sync-android."
+                    )
+                )
+            }
 
             // Always install to the canonical path. The daemon's g_self_path fix
             // means this is safe even while the daemon is running - the mv is

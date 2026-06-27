@@ -117,6 +117,13 @@ fun InstallationScreen(
                             if (!daemonFileExists) {
                                 PreferencesManager.getInstance(context).isDaemonModeEnabled = true
                             }
+                            withContext(Dispatchers.IO) {
+                                Shell.cmd(
+                                    "mkdir -p /data/local/Droidspaces/Logs; " +
+                                        "echo 1 > '${Constants.DAEMON_MODE_FILE}'; " +
+                                        "'${Constants.DROIDSPACES_BINARY_PATH}' daemon >/dev/null 2>&1 || true"
+                                ).exec()
+                            }
                             // Restore symlink if it was enabled before the update
                             if (wasSymlinkEnabled) {
                                 withContext(Dispatchers.IO) {

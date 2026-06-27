@@ -286,11 +286,36 @@ tasks.register("generateModuleProp") {
     }
 }
 
+tasks.register("verifyPackagedBinaries") {
+    val binariesDir = file("src/main/assets/binaries")
+    val required = listOf(
+        "droidspaces-aarch64",
+        "droidspaces-armhf",
+        "droidspaces-x86",
+        "droidspaces-x86_64",
+        "busybox-aarch64",
+        "busybox-armhf",
+        "busybox-x86",
+        "busybox-x86_64"
+    )
+
+    inputs.files(required.map { binariesDir.resolve(it) })
+
+    doLast {
+        val missing = required.filter { !binariesDir.resolve(it).isFile }
+        check(missing.isEmpty()) {
+            "Missing Android asset binaries: ${missing.joinToString()}. " +
+                "Run `make all-build` from the repository root before building the APK."
+        }
+    }
+}
+
 // Run before every build variant
 tasks.configureEach {
     if (name.startsWith("pre") && name.endsWith("Build")) {
         dependsOn("generateSupportedLocalesList")
         dependsOn("generateModuleProp")
+        dependsOn("verifyPackagedBinaries")
     }
 }
 
