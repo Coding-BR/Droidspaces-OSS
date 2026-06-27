@@ -387,11 +387,37 @@ fun ContainersScreen(
                 systemStatsViewModel.clearContainerUsage(container.name)
             }
 
+            // Check and prepare socket bind mount if starting or restarting
+            var currentContainer = container
+            if (operation == "start" || operation == "restart") {
+                if (!container.enableTermuxX11 && container.enableHwAccess) {
+                    val hasDisplaySockBind = container.bindMounts.any {
+                        it.src == "/data/local/tmp/display_daemon.sock" && it.dest == "/run/display.sock"
+                    }
+                    if (!hasDisplaySockBind) {
+                        logger.i("Preparing display socket bind mount for Anland...")
+                        val updatedBinds = container.bindMounts.toMutableList().apply {
+                            add(com.droidspaces.app.util.BindMount("/data/local/tmp/display_daemon.sock", "/run/display.sock"))
+                        }
+                        val updatedContainer = container.copy(bindMounts = updatedBinds)
+                        val configResult = withContext(Dispatchers.IO) {
+                            ContainerManager.updateContainerConfig(context, container.name, updatedContainer)
+                        }
+                        if (configResult.isSuccess) {
+                            logger.i("Display socket bind mount successfully prepared.")
+                            currentContainer = updatedContainer
+                        } else {
+                            logger.w("Warning: Failed to write display socket bind mount config: ${configResult.exceptionOrNull()?.message}")
+                        }
+                    }
+                }
+            }
+
             // Build command
             val command = when (operation) {
-                "start" -> ContainerCommandBuilder.buildStartCommand(container)
-                "stop" -> ContainerCommandBuilder.buildStopCommand(container)
-                "restart" -> ContainerCommandBuilder.buildRestartCommand(container)
+                "start" -> ContainerCommandBuilder.buildStartCommand(currentContainer)
+                "stop" -> ContainerCommandBuilder.buildStopCommand(currentContainer)
+                "restart" -> ContainerCommandBuilder.buildRestartCommand(currentContainer)
                 else -> {
                     runningOperationContainer = null
                     return

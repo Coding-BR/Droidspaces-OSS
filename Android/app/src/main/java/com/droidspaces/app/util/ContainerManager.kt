@@ -440,7 +440,25 @@ object ContainerManager {
                     ?.removePrefix("uuid=")?.trim() ?: ""
                 newConfig.copy(uuid = existingUuid)
             }
-            val configContent = configToWrite.toConfigContent()
+
+            // Ensure Anland display.sock bind mount is present when Termux-X11 is disabled and HW access is enabled
+            val finalConfig = if (!configToWrite.enableTermuxX11 && configToWrite.enableHwAccess) {
+                val hasDisplaySockBind = configToWrite.bindMounts.any { 
+                    it.src == "/data/local/tmp/display_daemon.sock" && it.dest == "/run/display.sock" 
+                }
+                if (!hasDisplaySockBind) {
+                    val updatedBinds = configToWrite.bindMounts.toMutableList().apply {
+                        add(BindMount("/data/local/tmp/display_daemon.sock", "/run/display.sock"))
+                    }
+                    configToWrite.copy(bindMounts = updatedBinds)
+                } else {
+                    configToWrite
+                }
+            } else {
+                configToWrite
+            }
+
+            val configContent = finalConfig.toConfigContent()
 
             // Handle .env file
             val envFilePath = "${getContainerDirectory(containerName)}/.env"
