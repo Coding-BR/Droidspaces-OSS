@@ -208,6 +208,12 @@ void ds_selinux_dyntransition(const char *mls) {
  * Returns 0 on success, -1 on failure.
  */
 int ds_drop_privileges(int uid) {
+  if (is_android()) {
+    gid_t groups[] = {uid, 3001, 3002, 3003, 1015, 1023, 1078, 1079};
+    if (setgroups(sizeof(groups) / sizeof(groups[0]), groups) < 0) {
+      ds_warn("[Android] setgroups failed: %s", strerror(errno));
+    }
+  }
   if (setresgid(uid, uid, uid) < 0 || setresuid(uid, uid, uid) < 0)
     return -1;
   return 0;

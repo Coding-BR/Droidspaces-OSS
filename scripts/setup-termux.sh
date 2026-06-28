@@ -47,10 +47,10 @@ if [ ! -f "$DEFAULT_PA" ]; then
     exit 1
 fi
 
-# Comment out module-sles-sink (missing Android HAL deps on most devices)
-if grep -q "^${SLES_LINE}" "$DEFAULT_PA"; then
-    sed -i "s|^${SLES_LINE}|#${SLES_LINE}|" "$DEFAULT_PA"
-    detail "Commented out $SLES_LINE"
+# Comment out module-aaudio-sink (fails on multiple Snapdragon devices due to HAL block)
+if grep -q "^${AAUDIO_LINE}" "$DEFAULT_PA"; then
+    sed -i "s|^${AAUDIO_LINE}|#${AAUDIO_LINE}|" "$DEFAULT_PA"
+    detail "Commented out $AAUDIO_LINE"
 fi
 
 # Comment out module-console-kit (no D-Bus system bus on Android, causes futex deadlock)
@@ -65,22 +65,22 @@ if grep -q "^${SIDLE_LINE}" "$DEFAULT_PA"; then
     detail "Commented out $SIDLE_LINE"
 fi
 
-# Check if already patched (aaudio appears before always-sink)
-AAUDIO_LINE_NUM=$(grep -n "^${AAUDIO_LINE}$" "$DEFAULT_PA" | head -1 | cut -d: -f1)
+# Check if already patched (sles appears before always-sink)
+SLES_LINE_NUM=$(grep -n "^${SLES_LINE}$" "$DEFAULT_PA" | head -1 | cut -d: -f1)
 ALWAYS_LINE_NUM=$(grep -n "^${ALWAYS_LINE}$" "$DEFAULT_PA" | head -1 | cut -d: -f1)
 
-if [ -n "$AAUDIO_LINE_NUM" ] && [ -n "$ALWAYS_LINE_NUM" ] && [ "$AAUDIO_LINE_NUM" -lt "$ALWAYS_LINE_NUM" ]; then
-    detail "default.pa already patched, skipping."
+if [ -n "$SLES_LINE_NUM" ] && [ -n "$ALWAYS_LINE_NUM" ] && [ "$SLES_LINE_NUM" -lt "$ALWAYS_LINE_NUM" ]; then
+    detail "default.pa already patched for OpenSL ES, skipping."
 else
-    sed -i "s|^${ALWAYS_LINE}|${AAUDIO_LINE}\n${ALWAYS_LINE}|" "$DEFAULT_PA"
-    detail "Injected $AAUDIO_LINE before $ALWAYS_LINE"
+    sed -i "s|^${ALWAYS_LINE}|${SLES_LINE}\nset-default-sink OpenSL_ES_sink\n${ALWAYS_LINE}|" "$DEFAULT_PA"
+    detail "Injected $SLES_LINE and default sink before $ALWAYS_LINE"
 
-    # Remove duplicate aaudio line at bottom if present
-    AAUDIO_COUNT=$(grep -c "^${AAUDIO_LINE}$" "$DEFAULT_PA" || true)
-    if [ "$AAUDIO_COUNT" -gt 1 ]; then
-        awk "BEGIN{found=0} /^${AAUDIO_LINE}$/{if(found){next}; found=1} {print}" "$DEFAULT_PA" > "$DEFAULT_PA.tmp"
+    # Remove duplicate sles line at bottom if present
+    SLES_COUNT=$(grep -c "^${SLES_LINE}$" "$DEFAULT_PA" || true)
+    if [ "$SLES_COUNT" -gt 1 ]; then
+        awk "BEGIN{found=0} /^${SLES_LINE}$/{if(found){next}; found=1} {print}" "$DEFAULT_PA" > "$DEFAULT_PA.tmp"
         mv "$DEFAULT_PA.tmp" "$DEFAULT_PA"
-        detail "Removed duplicate $AAUDIO_LINE"
+        detail "Removed duplicate $SLES_LINE"
     fi
 fi
 
