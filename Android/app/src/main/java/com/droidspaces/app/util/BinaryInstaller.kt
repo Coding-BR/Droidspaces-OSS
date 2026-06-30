@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.FileNotFoundException
+import java.security.MessageDigest
 
 sealed class InstallationStep {
     data class DetectingArchitecture(val arch: String) : InstallationStep()
@@ -23,6 +24,9 @@ object BinaryInstaller {
     private const val INSTALL_PATH = Constants.INSTALL_PATH
     private const val DROIDSPACES_BINARY_NAME = Constants.DROIDSPACES_BINARY_NAME
     private const val BUSYBOX_BINARY_NAME = Constants.BUSYBOX_BINARY_NAME
+    private const val PULSEAUDIO_ASSET_PATH = "pulseaudio-aarch64"
+    private const val PULSEAUDIO_TARGET_DIR = "/data/local/Droidspaces/usr"
+    private const val PULSEAUDIO_FINGERPRINT_FILE = "$PULSEAUDIO_TARGET_DIR/.droidspaces-pulseaudio-assets.md5"
 
     /**
      * Map Android architecture to binary name suffix
@@ -81,7 +85,8 @@ object BinaryInstaller {
 
             val droidspacesBinaryName = getDroidspacesBinaryName()
             val busyboxBinaryName = getBusyboxBinaryName()
-            val requiredAssets = listOf(droidspacesBinaryName, busyboxBinaryName)
+            val displayDaemonBinaryName = "display_daemon-aarch64"
+            val requiredAssets = listOf(droidspacesBinaryName, busyboxBinaryName, displayDaemonBinaryName)
             val missingAssets = requiredAssets.filter { assetName ->
                 try {
                     context.assets.open("binaries/$assetName").close()
@@ -184,11 +189,20 @@ object BinaryInstaller {
             installBinary(busyboxBinaryName, busyboxTargetPath, "busybox")
                 .getOrElse { error -> return@withContext Result.failure(error) }
 
+            // Step 4a: Install display_daemon binary
+            installBinary(displayDaemonBinaryName, "$INSTALL_PATH/display_daemon", "display_daemon")
+                .getOrElse { error -> return@withContext Result.failure(error) }
+
+            // Step 4b: Extract PulseAudio assets
+            extractPulseAudioAssets(context)
+                .getOrElse { error -> return@withContext Result.failure(error) }
+
             // Step 5: Verification (scripts are handled by ModuleInstaller)
 
             onProgress(InstallationStep.Verifying("droidspaces and busybox"))
             val verifyDroidspaces = Shell.cmd("test -x $droidspacesTargetPath && echo 'verified' || echo 'verification_failed'").exec()
             val verifyBusybox = Shell.cmd("test -x $busyboxTargetPath && echo 'verified' || echo 'verification_failed'").exec()
+            val verifyDisplayDaemon = Shell.cmd("test -x $INSTALL_PATH/display_daemon && echo 'verified' || echo 'verification_failed'").exec()
 
             if (!verifyDroidspaces.isSuccess || !verifyDroidspaces.out.any { it.contains("verified") }) {
                 return@withContext Result.failure(
@@ -199,6 +213,12 @@ object BinaryInstaller {
             if (!verifyBusybox.isSuccess || !verifyBusybox.out.any { it.contains("verified") }) {
                 return@withContext Result.failure(
                     Exception("Busybox binary verification failed: file is not executable")
+                )
+            }
+
+            if (!verifyDisplayDaemon.isSuccess || !verifyDisplayDaemon.out.any { it.contains("verified") }) {
+                return@withContext Result.failure(
+                    Exception("DisplayDaemon binary verification failed: file is not executable")
                 )
             }
 
@@ -236,6 +256,89 @@ object BinaryInstaller {
         val busyboxOk = busyboxResult.isSuccess && busyboxResult.out.any { it.contains("installed") }
 
         droidspacesOk && busyboxOk
+    }
+
+    private fun extractPulseAudioAssets(context: Context): Result<Unit> {
+        // Create folders
+        com.topjohnwu.superuser.Shell.cmd("mkdir -p $PULSEAUDIO_TARGET_DIR/bin $PULSEAUDIO_TARGET_DIR/lib $PULSEAUDIO_TARGET_DIR/etc/pulse/default.pa.d").exec()
+
+        val assetManager = context.assets
+
+        fun copyAssetFolder(subPath: String): Boolean {
+            try {
+                val list = assetManager.list("$PULSEAUDIO_ASSET_PATH/$subPath")
+                if (list == null || list.isEmpty()) {
+                    // It is a file! Copy it.
+                    val inputStream = assetManager.open("$PULSEAUDIO_ASSET_PATH/$subPath")
+                    val tempFile = java.io.File("${context.cacheDir}/${subPath.replace('/', '_')}")
+                    java.io.FileOutputStream(tempFile).use { output ->
+                        inputStream.copyTo(output)
+                    }
+                    inputStream.close()
+
+                    // Copy to target path (requires root)
+                    val targetFile = "$PULSEAUDIO_TARGET_DIR/$subPath"
+                    val dir = targetFile.substringBeforeLast('/')
+                    com.topjohnwu.superuser.Shell.cmd("mkdir -p $dir && cp ${tempFile.absolutePath} $targetFile && chmod 644 $targetFile").exec()
+                    tempFile.delete()
+                } else {
+                    // It is a directory! Recurse.
+                    for (file in list) {
+                        val nextSubPath = if (subPath.isEmpty()) file else "$subPath/$file"
+                        if (!copyAssetFolder(nextSubPath)) return false
+                    }
+                }
+                return true
+            } catch (e: Exception) {
+                android.util.Log.e("BinaryInstaller", "Failed to copy asset folder: $subPath", e)
+                return false
+            }
+        }
+
+        if (!copyAssetFolder("")) {
+            return Result.failure(Exception("Failed to copy PulseAudio assets"))
+        }
+
+        // Make binaries executable
+        com.topjohnwu.superuser.Shell.cmd("find $PULSEAUDIO_TARGET_DIR -type d -exec chmod 755 {} +").exec()
+        com.topjohnwu.superuser.Shell.cmd("find $PULSEAUDIO_TARGET_DIR -type f -exec chmod 644 {} +").exec()
+        com.topjohnwu.superuser.Shell.cmd("chmod 755 $PULSEAUDIO_TARGET_DIR/bin/pulseaudio $PULSEAUDIO_TARGET_DIR/bin/pactl").exec()
+
+        // Create symlink usr -> .
+        com.topjohnwu.superuser.Shell.cmd("rm -f $PULSEAUDIO_TARGET_DIR/usr && ln -sf . $PULSEAUDIO_TARGET_DIR/usr").exec()
+
+        val fingerprint = calculatePulseAudioAssetFingerprint(context)
+        com.topjohnwu.superuser.Shell.cmd("printf '%s\\n' '$fingerprint' > $PULSEAUDIO_FINGERPRINT_FILE").exec()
+
+        return Result.success(Unit)
+    }
+
+    private fun calculatePulseAudioAssetFingerprint(context: Context): String {
+        val digest = MessageDigest.getInstance("MD5")
+        val assetManager = context.assets
+        val buffer = ByteArray(8192)
+
+        fun updateAsset(path: String) {
+            val children = assetManager.list(path)
+            if (children == null || children.isEmpty()) {
+                digest.update(path.toByteArray(Charsets.UTF_8))
+                assetManager.open(path).use { input ->
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count == -1) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                return
+            }
+
+            children.sorted().forEach { child ->
+                updateAsset("$path/$child")
+            }
+        }
+
+        updateAsset(PULSEAUDIO_ASSET_PATH)
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }
 

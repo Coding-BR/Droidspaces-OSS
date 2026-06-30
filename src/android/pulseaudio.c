@@ -17,6 +17,39 @@
 
 /* ---- helpers ---------------------------------------------------------- */
 
+#define PA_CONFIG_DIR DS_PULSE_HOME "/.config/pulse"
+#define PA_COOKIE_FILE PA_CONFIG_DIR "/cookie"
+
+static int pa_write_cookie_if_missing(const char *path, int uid) {
+  if (access(path, F_OK) == 0)
+    return 0;
+
+  int rnd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (rnd < 0)
+    return -1;
+
+  unsigned char cookie[256];
+  ssize_t got = read(rnd, cookie, sizeof(cookie));
+  close(rnd);
+  if (got != (ssize_t)sizeof(cookie))
+    return -1;
+
+  int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (fd < 0)
+    return -1;
+
+  ssize_t written = write(fd, cookie, sizeof(cookie));
+  close(fd);
+  if (written != (ssize_t)sizeof(cookie))
+    return -1;
+
+  if (chown(path, uid, uid) < 0)
+    return -1;
+  if (chmod(path, 0600) < 0)
+    return -1;
+  return 0;
+}
+
 /*
  * Resolve the Termux UID from packages.list.
  * Returns the UID on success, -1 on failure.
@@ -49,32 +82,27 @@ static int pa_resolve_termux_uid(void) {
 }
 
 static int pa_prepare_termux_tmp(int uid) {
-  pid_t child = fork();
-  if (child < 0)
+  if (mkdir_p(DS_PULSE_PREFIX "/tmp", 01777) < 0)
+    return -1;
+  if (chmod(DS_PULSE_PREFIX "/tmp", 01777) < 0)
+    return -1;
+  if (chown(DS_PULSE_PREFIX "/tmp", uid, uid) < 0)
     return -1;
 
-  if (child == 0) {
-    if (ds_drop_privileges(uid) < 0)
-      _exit(1);
-    if (mkdir_p(TX11_PREFIX "/tmp", 01777) < 0)
-      _exit(1);
-    if (chmod(TX11_PREFIX "/tmp", 01777) < 0)
-      _exit(1);
-    _exit(0);
-  }
-
-  int status = 0;
-  if (waitpid(child, &status, 0) < 0)
+  if (mkdir_p(PA_CONFIG_DIR, 0700) < 0)
     return -1;
-  if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
-    return 0;
+  if (chown(DS_PULSE_HOME "/.config", uid, uid) < 0)
+    return -1;
+  if (chown(PA_CONFIG_DIR, uid, uid) < 0)
+    return -1;
+  if (chmod(DS_PULSE_HOME "/.config", 0700) < 0)
+    return -1;
+  if (chmod(PA_CONFIG_DIR, 0700) < 0)
+    return -1;
+  if (pa_write_cookie_if_missing(PA_COOKIE_FILE, uid) < 0)
+    return -1;
 
-  int ok = 1;
-  if (mkdir_p(TX11_PREFIX "/tmp", 01777) < 0)
-    ok = 0;
-  if (chmod(TX11_PREFIX "/tmp", 01777) < 0)
-    ok = 0;
-  return ok ? 0 : -1;
+  return 0;
 }
 
 /*
@@ -138,10 +166,11 @@ static void pulse_child_wrapper(int ready_fd, void *user_data) {
   ds_oom_protect();
 
   /* Set up the Termux environment before dropping privileges */
-  setenv("TMPDIR", TX11_PREFIX "/tmp", 1);
-  setenv("HOME", TX11_HOME, 1);
-  setenv("PREFIX", TX11_PREFIX, 1);
+  setenv("TMPDIR", DS_PULSE_PREFIX "/tmp", 1);
+  setenv("HOME", DS_PULSE_HOME, 1);
+  setenv("PREFIX", DS_PULSE_PREFIX, 1);
   setenv("PULSE_SERVER", "unix:" TX11_PULSE_SOCKET, 1);
+  setenv("LD_LIBRARY_PATH", DS_PULSE_PREFIX "/lib:" DS_PULSE_PREFIX "/lib/pulseaudio", 1);
 
   /* Ensure tmp is usable by Termux-side daemons and sockets. */
   if (pa_prepare_termux_tmp(args->uid) < 0) {
@@ -183,6 +212,7 @@ static void pulse_child_wrapper(int ready_fd, void *user_data) {
       "--exit-idle-time=-1",
       "--daemonize=no",
       "--log-target=stderr",
+      "--log-level=error",
       "--use-pid-file=false",
       "--disallow-exit",
       NULL,
@@ -221,7 +251,8 @@ static void run_pactl_set_default(int uid) {
       _exit(1);
 
     setenv("PULSE_SERVER", "unix:" TX11_PULSE_SOCKET, 1);
-    setenv("HOME", TX11_HOME, 1);
+    setenv("HOME", DS_PULSE_HOME, 1);
+    setenv("LD_LIBRARY_PATH", DS_PULSE_PREFIX "/lib:" DS_PULSE_PREFIX "/lib/pulseaudio", 1);
 
     char *argv[] = {TX11_PACTL_BIN, "set-default-sink", TX11_PULSE_DEFAULT_SINK,
                     NULL};
@@ -233,8 +264,6 @@ static void run_pactl_set_default(int uid) {
 }
 
 /* ---- stale config nuke ------------------------------------------------ */
-
-#define PA_CONFIG_DIR TX11_HOME "/.config/pulse"
 
 /*
  * Remove PulseAudio's stale runtime dir before each start.
@@ -333,10 +362,10 @@ int ds_setup_pulse_socket(struct ds_config *cfg) {
     return 0;
 
   /* Post-pivot_root: host filesystem is under /.old_root.
-   * TX11_PULSE_SOCKET lives in TX11_PREFIX/tmp, accessed via
-   * DS_TERMUX_TMP_OLDROOT, exactly like the VirGL socket. */
+   * TX11_PULSE_SOCKET lives in DS_PULSE_PREFIX/tmp, accessed via
+   * DS_PULSE_TMP_OLDROOT, exactly like the VirGL socket. */
   char src[PATH_MAX];
-  snprintf(src, sizeof(src), "%s/.pulse-socket", DS_TERMUX_TMP_OLDROOT);
+  snprintf(src, sizeof(src), "%s/.pulse-socket", DS_PULSE_TMP_OLDROOT);
 
   struct stat st;
   if (stat(src, &st) != 0) {

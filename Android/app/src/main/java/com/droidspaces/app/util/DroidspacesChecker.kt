@@ -20,8 +20,12 @@ sealed class DroidspacesBackendStatus {
 object DroidspacesChecker {
     private const val DROIDSPACES_BINARY_PATH = Constants.DROIDSPACES_BINARY_PATH
     private const val BUSYBOX_BINARY_PATH = Constants.BUSYBOX_BINARY_PATH
+    private const val DISPLAY_DAEMON_BINARY_PATH = "${Constants.INSTALL_PATH}/display_daemon"
     private const val MAGISK_MODULE_PATH = "/data/adb/modules/droidspaces"
     private const val MODULE_PROP_PATH = "$MAGISK_MODULE_PATH/module.prop"
+    private const val PULSEAUDIO_ASSET_PATH = "pulseaudio-aarch64"
+    private const val PULSEAUDIO_TARGET_DIR = "/data/local/Droidspaces/usr"
+    private const val PULSEAUDIO_FINGERPRINT_FILE = "$PULSEAUDIO_TARGET_DIR/.droidspaces-pulseaudio-assets.md5"
 
     /**
      * Check if Magisk module is installed.
@@ -117,28 +121,52 @@ object DroidspacesChecker {
                 else -> "droidspaces-aarch64"
             }
 
-            // Calculate hash of installed binary
-            val installedHashResult = Shell.cmd("md5sum $DROIDSPACES_BINARY_PATH 2>&1 | cut -d' ' -f1").exec()
-            if (!installedHashResult.isSuccess || installedHashResult.out.isEmpty()) {
-                return@withContext false
-            }
-            val installedHash = installedHashResult.out[0].trim()
-
-            // Calculate hash of asset binary
-            val assetManager = context.assets
-            val assetHash = try {
-                assetManager.open("binaries/$binaryName").use { inputStream ->
+            val installedDroidspacesHash = calculateInstalledMD5(DROIDSPACES_BINARY_PATH)
+                ?: return@withContext false
+            val assetDroidspacesHash = try {
+                context.assets.open("binaries/$binaryName").use { inputStream ->
                     calculateMD5(inputStream)
                 }
             } catch (e: Exception) {
                 return@withContext false
             }
 
-            // Compare hashes - if different, update is available
-            installedHash != assetHash
+            if (installedDroidspacesHash != assetDroidspacesHash) {
+                return@withContext true
+            }
+
+            val installedDisplayHash = calculateInstalledMD5(DISPLAY_DAEMON_BINARY_PATH)
+                ?: return@withContext true
+            val assetDisplayHash = try {
+                context.assets.open("binaries/display_daemon-aarch64").use { inputStream ->
+                    calculateMD5(inputStream)
+                }
+            } catch (e: Exception) {
+                return@withContext false
+            }
+
+            if (installedDisplayHash != assetDisplayHash) {
+                return@withContext true
+            }
+
+            val installedPulseFingerprint = Shell.cmd("cat $PULSEAUDIO_FINGERPRINT_FILE 2>/dev/null").exec()
+                .out
+                .firstOrNull()
+                ?.trim()
+            val assetPulseFingerprint = calculatePulseAudioAssetFingerprint(context)
+
+            installedPulseFingerprint != assetPulseFingerprint
         } catch (e: Exception) {
             false
         }
+    }
+
+    private fun calculateInstalledMD5(path: String): String? {
+        val result = Shell.cmd("md5sum '$path' 2>/dev/null | cut -d' ' -f1").exec()
+        if (!result.isSuccess || result.out.isEmpty()) {
+            return null
+        }
+        return result.out[0].trim().takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -153,6 +181,34 @@ object DroidspacesChecker {
         }
         val digest = md.digest()
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun calculatePulseAudioAssetFingerprint(context: Context): String {
+        val digest = MessageDigest.getInstance("MD5")
+        val assetManager = context.assets
+        val buffer = ByteArray(8192)
+
+        fun updateAsset(path: String) {
+            val children = assetManager.list(path)
+            if (children == null || children.isEmpty()) {
+                digest.update(path.toByteArray(Charsets.UTF_8))
+                assetManager.open(path).use { input ->
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count == -1) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                return
+            }
+
+            children.sorted().forEach { child ->
+                updateAsset("$path/$child")
+            }
+        }
+
+        updateAsset(PULSEAUDIO_ASSET_PATH)
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     /**

@@ -2,7 +2,7 @@
 set -eu
 
 DROIDSPACES="${DROIDSPACES:-/data/local/Droidspaces/bin/droidspaces}"
-CONTAINER="${CONTAINER:-ubuntu}"
+CONTAINER="${CONTAINER:-Ubuntu}"
 CONFIG="${CONFIG:-/data/local/Droidspaces/Containers/$CONTAINER/container.config}"
 ENVFILE="${ENVFILE:-/data/local/Droidspaces/Containers/$CONTAINER/anland.env}"
 ANLAND_SOCKET_HOST="${ANLAND_SOCKET_HOST:-/data/local/tmp/display_daemon.sock}"

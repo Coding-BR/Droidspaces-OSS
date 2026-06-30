@@ -194,6 +194,16 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    lint {
+        disable += "MissingTranslation"
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/jni/CMakeLists.txt")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

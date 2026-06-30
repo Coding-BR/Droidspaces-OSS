@@ -148,11 +148,15 @@
 #define TX11_VIRGL_BIN TX11_PREFIX "/bin/virgl_test_server_android"
 
 /* PulseAudio paths (Android only) */
+#define DS_PULSE_PREFIX "/data/local/Droidspaces/usr"
+#define DS_PULSE_HOME "/data/local/Droidspaces/usr"
+#define DS_PULSE_TMP_OLDROOT "/.old_root/data/local/Droidspaces/usr/tmp"
+
 #define DS_PULSE_SOCKET "/tmp/.pulse-socket"
-#define TX11_PULSE_SOCKET TX11_PREFIX "/tmp/.pulse-socket"
-#define TX11_PULSE_BIN TX11_PREFIX "/bin/pulseaudio"
-#define TX11_PACTL_BIN TX11_PREFIX "/bin/pactl"
-#define TX11_PULSE_DEFAULT_SINK "AAudio_sink"
+#define TX11_PULSE_SOCKET DS_PULSE_PREFIX "/tmp/.pulse-socket"
+#define TX11_PULSE_BIN DS_PULSE_PREFIX "/bin/pulseaudio"
+#define TX11_PACTL_BIN DS_PULSE_PREFIX "/bin/pactl"
+#define TX11_PULSE_DEFAULT_SINK "OpenSL_ES_sink"
 
 /* File Extensions */
 #define DS_EXT_PID ".pid"

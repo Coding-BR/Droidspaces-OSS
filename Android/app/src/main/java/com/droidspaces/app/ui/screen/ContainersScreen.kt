@@ -389,8 +389,9 @@ fun ContainersScreen(
 
             // Check and prepare socket bind mount if starting or restarting
             var currentContainer = container
+            val usesAnland = !container.enableTermuxX11 && container.enableHwAccess
             if (operation == "start" || operation == "restart") {
-                if (!container.enableTermuxX11 && container.enableHwAccess) {
+                if (usesAnland) {
                     val hasDisplaySockBind = container.bindMounts.any {
                         it.src == "/data/local/tmp/display_daemon.sock" && it.dest == "/run/display.sock"
                     }
@@ -424,6 +425,11 @@ fun ContainersScreen(
                 }
             }
 
+            if ((operation == "start" || operation == "restart") && usesAnland) {
+                logger.i("Preparing Anland display daemon and consumer...")
+                com.droidspaces.app.util.DisplayDaemonManager.prepare()
+            }
+
             // Execute command using logger callback pattern (same as installation).
             // Pass operationCompletedMessage so the success line is logged inside executeCommand
             // in guaranteed order on Main.immediate - before this coroutine resumes.
@@ -435,6 +441,14 @@ fun ContainersScreen(
                 logger = logger,
                 operationCompletedMessage = context.getString(R.string.operation_completed_success)
             )
+
+            if (operation == "stop") {
+                com.droidspaces.app.util.DisplayDaemonManager.stop()
+            }
+            if ((operation == "start" || operation == "restart") && success && usesAnland) {
+                logger.i("Starting KDE Plasma on Anland...")
+                com.droidspaces.app.util.DisplayDaemonManager.startKde(currentContainer.name)
+            }
 
             if (!success) {
                 lastErrorContainer = container.name

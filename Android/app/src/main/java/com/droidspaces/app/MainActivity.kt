@@ -24,6 +24,12 @@ import com.droidspaces.app.ui.theme.rememberThemeState
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        init {
+            System.loadLibrary("anland_consumer")
+        }
+    }
+
     private var isLoading by mutableStateOf(false)
 
     // ── POST_NOTIFICATIONS permission (Android 13+ / API 33+) ─────────────────

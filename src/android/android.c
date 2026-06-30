@@ -234,14 +234,24 @@ int ds_resolve_termux_uid(void) {
   int uid = -1;
 
   while (fgets(line, sizeof(line), f)) {
-    if (strncmp(line, "com.termux ", 11) == 0) {
-      uid = atoi(line + 11);
+    if (strncmp(line, "com.droidspaces.app ", 20) == 0) {
+      uid = atoi(line + 20);
       break;
+    }
+  }
+
+  if (uid < 0) {
+    rewind(f);
+    while (fgets(line, sizeof(line), f)) {
+      if (strncmp(line, "com.termux ", 11) == 0) {
+        uid = atoi(line + 11);
+        break;
+      }
     }
   }
   fclose(f);
 
   if (uid < 0)
-    ds_warn("[Android] com.termux not found in packages.list");
+    ds_warn("[Android] com.droidspaces.app or com.termux not found in packages.list");
   return uid;
 }
